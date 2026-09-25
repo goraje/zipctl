@@ -70,7 +70,7 @@ def _violation(
 
 
 def entry_mode(info: ZipInfo) -> int:
-    return (info.external_attr >> 16) & 0o170000
+    return info.unix_mode & 0o170000
 
 
 def entry_type(info: ZipInfo) -> tuple[bool, bool]:
@@ -249,11 +249,29 @@ def check_compression_ratio(params: ValidatorParams) -> Iterable[ExtractViolatio
         )
 
 
+def extension_chains(filename: str) -> frozenset[str]:
+    """Return every trailing chain of dotted suffixes of *filename*, lower-cased.
+
+    ``a.tar.gz`` gives ``{".gz", ".tar.gz"}``.  A name without a suffix
+    (``README``, ``.bashrc``) gives ``{""}``, so ``""`` stands for "no
+    extension".  A rule entry matches when it is one of these chains.  Dot
+    handling follows :class:`pathlib.Path`: leading dots do not start a suffix.
+    """
+    path = Path(filename)
+    # Before Python 3.14 a trailing dot means "no suffix"; keep that everywhere
+    # so a name matches the same rules on every supported version.
+    suffixes = [] if path.name.endswith(".") else [s.lower() for s in path.suffixes]
+    if not suffixes:
+        return frozenset({""})
+    return frozenset("".join(suffixes[start:]) for start in range(len(suffixes)))
+
+
 def check_extension_allowed(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, context = params.info, params.target, params.context
     rule = resolve_rule(context.policy.allowed_extensions, context.policy.on_violation)
-    suffix = Path(info.filename).suffix.lower()
-    if rule.value is not None and suffix not in rule.value:
+    if rule.value is not None and extension_chains(info.filename).isdisjoint(
+        rule.value
+    ):
         yield _violation(
             info,
             "extension_not_allowed",
@@ -266,8 +284,9 @@ def check_extension_allowed(params: ValidatorParams) -> Iterable[ExtractViolatio
 def check_extension_blocked(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, context = params.info, params.target, params.context
     rule = resolve_rule(context.policy.blocked_extensions, context.policy.on_violation)
-    suffix = Path(info.filename).suffix.lower()
-    if rule.value is not None and suffix in rule.value:
+    if rule.value is not None and not extension_chains(info.filename).isdisjoint(
+        rule.value
+    ):
         yield _violation(
             info, "extension_blocked", "extension is blocked", target, rule.action
         )

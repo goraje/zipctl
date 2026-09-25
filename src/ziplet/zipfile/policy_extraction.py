@@ -203,9 +203,8 @@ def extract_with_policy(
             reporter.finish(result.status, result.bytes_written)
 
     extracted = sum(r.status == MemberStatus.EXTRACTED for r in results)
-    skipped = sum(
-        r.status in (MemberStatus.SKIPPED, MemberStatus.PREVIEWED) for r in results
-    )
+    skipped = sum(r.status == MemberStatus.SKIPPED for r in results)
+    previewed = sum(r.status == MemberStatus.PREVIEWED for r in results)
     failed = sum(r.status == MemberStatus.FAILED for r in results)
     if any(v.action == ViolationAction.ERROR for v in violations):
         failed = max(failed, 1)
@@ -218,4 +217,5 @@ def extract_with_policy(
         failed,
         sum(r.bytes_written for r in results),
         policy.preview_only,
+        previewed,
     )

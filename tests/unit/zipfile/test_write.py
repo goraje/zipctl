@@ -191,3 +191,37 @@ class TestWriteCoordinatorRecovery:
 
         with ziplet.ZipFile(archive) as zf2:
             assert zf2.read("small.txt") == b"ok"
+
+
+def test_a_write_handle_that_fails_to_build_finalises_quietly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import gc
+    import sys
+
+    unraisable: list[object] = []
+    monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
+    with ziplet.ZipFile(io.BytesIO(), "w") as zf:
+        with pytest.raises(ValueError, match=r"\S"):
+            zf.writestr(
+                "a.txt", b"x", compress_type=ziplet.ZIP_DEFLATED, compresslevel=99
+            )
+        zf.writestr("b.txt", b"still usable")
+    gc.collect()
+    assert unraisable == []
+
+
+def test_mkdir_accepts_a_zipinfo_that_has_not_been_written_yet() -> None:
+    info = ZipInfo("docs/", (2020, 5, 17, 8, 30, 10))
+    info.external_attr = (0o40750 << 16) | 0x10
+    info.comment = b"folder"
+    buffer = io.BytesIO()
+    with ziplet.ZipFile(buffer, "w") as zf:
+        zf.mkdir(info)
+    with ziplet.ZipFile(buffer) as zf:
+        (entry,) = zf.infolist()
+    assert entry.is_dir()
+    assert (entry.file_size, entry.compress_size, entry.CRC) == (0, 0, 0)
+    assert entry.date_time == (2020, 5, 17, 8, 30, 10)
+    assert entry.external_attr >> 16 == 0o40750
+    assert entry.comment == b"folder"

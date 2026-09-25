@@ -17,7 +17,6 @@ import itertools
 import pathlib
 import posixpath
 import re
-import stat
 from collections.abc import Iterable, Iterator
 from typing import IO, Any, cast
 
@@ -417,9 +416,7 @@ class Path:
         """Return whether this path is a symlink."""
         if not self.exists():
             return False
-        info = self.root.getinfo(self.at)
-        mode = info.external_attr >> 16
-        return stat.S_ISLNK(mode)
+        return self.root.getinfo(self.at).is_symlink()
 
     def glob(self, pattern: str) -> Iterator[Path]:
         """Yield paths matching the glob *pattern*, relative to this directory.

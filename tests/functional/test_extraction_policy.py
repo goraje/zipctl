@@ -56,7 +56,8 @@ def test_policy_preview_is_a_real_dry_run(tmp_path: Path) -> None:
         )
 
     assert result.preview_only
-    assert result.extracted_count == 0
+    assert (result.extracted_count, result.skipped_count) == (0, 0)
+    assert result.previewed_count == 1
     assert result.members[0].status == ziplet.MemberStatus.PREVIEWED
     assert not destination.exists()
 

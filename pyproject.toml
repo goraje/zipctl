@@ -30,8 +30,12 @@ dependencies = [
     "typing-extensions>=4.0.0; python_version < '3.11'",
 ]
 
+[project.scripts]
+ziplet = "ziplet.cli:main"
+
 [project.optional-dependencies]
 zstd = ["backports.zstd>=1.0.0; python_version < '3.14'"]
+completion = ["shtab>=1.12.1"]
 
 [build-system]
 requires = ["hatch-vcs>=0.5.0", "hatchling>=1.27"]
@@ -46,6 +50,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=6.0.0",
     "pytest-sugar>=1.1.1",
+    "shtab>=1.12.1",
 ]
 
 [tool.ruff]
@@ -58,8 +63,25 @@ lint.select = [
     "I",
     "PIE",
     "PT",
+    "SLF001",
+    "TID251",
     "W",
 ]
+
+# The library never imports the CLI; only the CLI, __main__ and tests may.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"ziplet.cli".msg = "the library must not import the CLI"
+
+[tool.ruff.lint.per-file-ignores]
+"src/ziplet/cli/**" = ["TID251"]
+"src/ziplet/__main__.py" = ["TID251"]
+"tests/**" = ["TID251", "SLF001"]
+# Private access is normal inside the library; SLF001 only guards the CLI.
+"src/ziplet/{zipfile,compression,cryptography}/**" = ["SLF001"]
+"src/ziplet/{__init__,exceptions}.py" = ["SLF001"]
+# argparse has no public API for what these three files customise.
+"src/ziplet/cli/{parser,formatter}.py" = ["SLF001"]
+"src/ziplet/cli/commands/helpers/command.py" = ["SLF001"]
 
 [tool.pytest.ini_options]
 markers = [
@@ -71,6 +93,9 @@ Stichting = "Stichting"
 STICHTING = "STICHTING"
 Mathematisch = "Mathematisch"
 MATHEMATISCH = "MATHEMATISCH"
+caf = "caf"  # "caf\xe9" (café) escaped in expected output
+entires = "entires"  # a deliberately misspelled policy key
+pasword = "pasword"  # a deliberately misspelled encryption-spec key
 
 [tool.typos.default]
 extend-ignore-re = [

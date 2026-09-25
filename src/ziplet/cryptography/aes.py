@@ -9,7 +9,9 @@ from __future__ import annotations
 import hmac as stdlib_hmac
 import os
 import sys
+import threading
 from array import array
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import hashes, hmac
@@ -27,6 +29,10 @@ __all__ = [
     "WZ_AES_V1",
     "WZ_AES_V2",
     "EXTRA_WZ_AES",
+    "AES_STRENGTH_BITS",
+    "WZ_AES_DEFAULT_VERSION",
+    "wz_aes_stores_crc",
+    "AesKeyCache",
     "AesZipDecrypter",
     "AesZipEncryptor",
 ]
@@ -35,6 +41,8 @@ WZ_AES = "WZ_AES"
 WZ_AES_COMPRESS_TYPE = 99
 WZ_AES_V1 = 0x0001
 WZ_AES_V2 = 0x0002
+# The version written when none is asked for.
+WZ_AES_DEFAULT_VERSION = WZ_AES_V2
 
 EXTRA_WZ_AES = 0x9901
 
@@ -52,10 +60,61 @@ _WZ_KEY_LENGTHS: dict[int, int] = {
 }
 
 _PWD_VERIFY_LENGTH = 2
-_NBITS_TO_STRENGTH: dict[int, int] = {128: 1, 192: 2, 256: 3}
+# The strength code stored in an archive -> the key size in bits.
+AES_STRENGTH_BITS: dict[int, int] = {1: 128, 2: 192, 3: 256}
+_NBITS_TO_STRENGTH: dict[int, int] = {
+    bits: code for code, bits in AES_STRENGTH_BITS.items()
+}
+
+
+def wz_aes_stores_crc(version: int | None) -> bool:
+    """Whether a WZ-AES entry of *version* (``None``: the default) keeps its CRC-32.
+
+    Version 2 stores 0 in its place and relies on the HMAC alone.
+    """
+    return (WZ_AES_DEFAULT_VERSION if version is None else version) != WZ_AES_V2
 
 
 _BLOCK_SIZE = 16
+
+
+class AesKeyCache:
+    """Derived WZ-AES key material, so one password is derived once per member.
+
+    PBKDF2 is the cost of opening an encrypted member (about 1 ms); checking a
+    password and then reading the member, or seeking backwards in it, would
+    otherwise derive it again.  Only material whose password verifier matched
+    is stored, so wrong guesses neither fill the cache nor stay in memory.  The
+    cache holds at most *maxsize* entries (least recently used out) and is
+    thread-safe.  Keys contain the password, so an owner should :meth:`clear`
+    it when done, as :class:`~ziplet.zipfile.file.ZipFile` does on close.
+    """
+
+    def __init__(self, maxsize: int = 128) -> None:
+        self._maxsize = maxsize
+        self._entries: OrderedDict[tuple[bytes, bytes, int], bytes] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, pwd: bytes, salt: bytes, length: int) -> bytes | None:
+        """The key material derived for these inputs, if it is cached."""
+        with self._lock:
+            material = self._entries.get((pwd, salt, length))
+            if material is not None:
+                self._entries.move_to_end((pwd, salt, length))
+            return material
+
+    def put(self, pwd: bytes, salt: bytes, length: int, material: bytes) -> None:
+        """Remember *material* (already checked against its verifier)."""
+        with self._lock:
+            self._entries[(pwd, salt, length)] = material
+            self._entries.move_to_end((pwd, salt, length))
+            while len(self._entries) > self._maxsize:
+                self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        """Forget everything."""
+        with self._lock:
+            self._entries.clear()
 
 
 def _counter_blocks(start: int, count: int) -> bytes:
@@ -161,6 +220,7 @@ class AesZipDecrypter(BaseZipDecrypter):
         zinfo: ZipInfo,
         pwd: bytes | str,
         encryption_header: bytes,
+        key_cache: AesKeyCache | None = None,
     ) -> None:
         """Initialise the decrypter for a ZIP entry.
 
@@ -170,6 +230,8 @@ class AesZipDecrypter(BaseZipDecrypter):
                 as UTF-8.
             encryption_header (bytes): Salt and password-verification bytes
                 read from the beginning of the entry data.
+            key_cache (AesKeyCache | None): Where to look for, and keep, the
+                derived keys.  ``None`` derives them every time.
 
         Raises:
             BadZipFile: If *zinfo* has no AES strength field.
@@ -197,16 +259,23 @@ class AesZipDecrypter(BaseZipDecrypter):
         pwd_verify = encryption_header[salt_length : salt_length + _PWD_VERIFY_LENGTH]
         dk_len = 2 * key_length + _PWD_VERIFY_LENGTH
 
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA1(),
-            length=dk_len,
-            salt=salt,
-            iterations=1000,
+        keymaterial = (
+            key_cache.get(pwd, salt, dk_len) if key_cache is not None else None
         )
-        keymaterial = kdf.derive(pwd)
+        if keymaterial is None:
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA1(),
+                length=dk_len,
+                salt=salt,
+                iterations=1000,
+            )
+            keymaterial = kdf.derive(pwd)
 
+        # Also for cached material: a header may carry a verifier of its own.
         if not stdlib_hmac.compare_digest(keymaterial[2 * key_length :], pwd_verify):
             raise BadPassword("Bad password for file %r" % zinfo.filename)
+        if key_cache is not None:
+            key_cache.put(pwd, salt, dk_len, keymaterial)
 
         self.decrypter = _AesCtrWithLittleEndian(keymaterial[:key_length])
         self.hmac = hmac.HMAC(

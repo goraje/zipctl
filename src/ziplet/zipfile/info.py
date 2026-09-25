@@ -23,8 +23,13 @@ from ziplet.compression.methods import (
     ZSTANDARD_VERSION,
 )
 from ziplet.cryptography import (
+    AES_STRENGTH_BITS,
+    WZ_AES,
+    WZ_AES_DEFAULT_VERSION,
     WZ_AES_V1,
     WZ_AES_V2,
+    ZIP_CRYPTO,
+    wz_aes_stores_crc,
 )
 from ziplet.cryptography.aes import EXTRA_WZ_AES, WZ_AES_COMPRESS_TYPE
 from ziplet.exceptions import BadZipFile, LargeZipFile
@@ -75,6 +80,11 @@ class WzAesExtra:
 # Extensible data field codes
 # ---------------------------------------------------------------------------
 _EXTRA_ZIP64 = 0x0001
+_EXTRA_UNICODE_PATH = 0x7075
+# What a copy of an entry does not carry over: the ZIP64 sizes and the AES
+# settings (the writer builds them again) and the Unicode path (it is checksummed
+# against the name bytes as first stored).
+_EXTRA_NOT_CARRIED = (_EXTRA_ZIP64, EXTRA_WZ_AES, _EXTRA_UNICODE_PATH)
 
 # ---------------------------------------------------------------------------
 # # Data descriptor signature
@@ -346,6 +356,25 @@ class ZipInfo:
         return bool(self.flag_bits & MASK_ENCRYPTED)
 
     @property
+    def encryption_scheme(self) -> str | None:
+        """``WZ_AES`` or ``ZIP_CRYPTO`` for an encrypted entry, else ``None``."""
+        if not self.is_encrypted:
+            return None
+        return ZIP_CRYPTO if self.aes_extra.wz_aes_strength is None else WZ_AES
+
+    @property
+    def aes_bits(self) -> int | None:
+        """The AES key size in bits, or ``None`` (not AES, or an unknown strength)."""
+        strength = self.aes_extra.wz_aes_strength
+        return None if strength is None else AES_STRENGTH_BITS.get(strength)
+
+    @property
+    def stores_crc(self) -> bool:
+        """Whether the CRC-32 in the headers is the real one (WZ-AES 2 stores 0)."""
+        extra = self.aes_extra
+        return extra.wz_aes_vendor_id is None or wz_aes_stores_crc(extra.wz_aes_version)
+
+    @property
     def is_utf_filename(self) -> bool:
         """Return ``True`` if filenames are encoded in UTF-8."""
         return bool(self.flag_bits & MASK_UTF_FILENAME)
@@ -359,6 +388,16 @@ class ZipInfo:
     def is_strong_encryption(self) -> bool:
         """Return ``True`` if the strong encryption flag is set."""
         return bool(self.flag_bits & MASK_STRONG_ENCRYPTION)
+
+    @property
+    def carried_extra(self) -> bytes:
+        """The extra fields a copy of this entry keeps.
+
+        Timestamps, owners and the like; the fields the writer builds again (ZIP64,
+        WZ-AES) and the Unicode path are left out.  Raises :class:`BadZipFile` if
+        the extra data is malformed, which cannot be so for a parsed entry.
+        """
+        return _Extra.strip(self.extra, _EXTRA_NOT_CARRIED)
 
     @property
     def use_data_descriptor(self) -> bool:
@@ -557,10 +596,10 @@ class ZipInfo:
             compress_type = WZ_AES_COMPRESS_TYPE
             aes_version = self.aes_extra.wz_aes_version
             if aes_version is None:
-                aes_version = WZ_AES_V2
+                aes_version = WZ_AES_DEFAULT_VERSION
             if aes_version not in (WZ_AES_V1, WZ_AES_V2):
                 raise ValueError("force_wz_aes_version must be 1 or 2")
-            if aes_version == WZ_AES_V2:
+            if not wz_aes_stores_crc(aes_version):
                 crc = 0
             wz_aes_extra = struct.pack(
                 "<3H2sBH",
@@ -927,7 +966,7 @@ class ZipInfo:
             tp, ln = unpack("<HH", extra[:4])
             if ln + 4 > len(extra):
                 raise BadZipFile("Corrupt extra field %04x (size=%d)" % (tp, ln))
-            if tp == 0x7075:
+            if tp == _EXTRA_UNICODE_PATH:
                 # Unicode Path Extra Field — needs filename_crc, handle inline
                 data = extra[4 : ln + 4]
                 try:
@@ -962,6 +1001,7 @@ class ZipInfo:
         arcname: str | os.PathLike[str] | None = None,
         *,
         strict_timestamps: bool = True,
+        follow_symlinks: bool = True,
     ) -> ZipInfo:
         """Construct a ``ZipInfo`` from a file or directory on the filesystem.
 
@@ -972,6 +1012,8 @@ class ZipInfo:
             strict_timestamps: When ``False``, timestamps before 1980 are
                 clamped to ``1980-01-01`` and timestamps after 2107 are clamped
                 to ``2107-12-31`` instead of raising an error.
+            follow_symlinks: When ``False``, describe a symbolic link itself
+                (``lstat``) rather than what it points to.
 
         Returns:
             A new ``ZipInfo`` instance with ``file_size`` and ``external_attr``
@@ -979,7 +1021,7 @@ class ZipInfo:
         """
         if isinstance(filename, os.PathLike):
             filename = os.fspath(filename)
-        st = os.stat(filename)
+        st = os.stat(filename) if follow_symlinks else os.lstat(filename)
         isdir = stat.S_ISDIR(st.st_mode)
         mtime = time.localtime(st.st_mtime)
         date_time = mtime[0:6]
@@ -1046,6 +1088,15 @@ class ZipInfo:
         else:
             self.external_attr = 0o600 << 16  # ?rw-------
         return self
+
+    @property
+    def unix_mode(self) -> int:
+        """The Unix mode kept in the high 16 bits of ``external_attr`` (0: none)."""
+        return (self.external_attr >> 16) & 0xFFFF
+
+    def is_symlink(self) -> bool:
+        """Return True if this archive member is a symbolic link."""
+        return stat.S_ISLNK(self.unix_mode)
 
     def is_dir(self) -> bool:
         """Return True if this archive member is a directory."""

@@ -1,0 +1,116 @@
+"""Matching known and prompted passwords to encrypted members."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from enum import Enum
+
+from ziplet.cli.commands.helpers.passwords.sources import (
+    WAYS_TO_GIVE,
+    password_bytes,
+    prompt_password,
+    require_tty_for_prompt,
+    static_passwords,
+)
+from ziplet.cli.context import Context
+from ziplet.cli.output import printable
+from ziplet.zipfile.file import ZipFile
+from ziplet.zipfile.info import ZipInfo
+from ziplet.zipfile.password import PasswordStatus
+
+MAX_PROMPT_ATTEMPTS = 3
+
+
+class PasswordProblem(Enum):
+    """Why a member could not be given a password."""
+
+    MISSING = "no_password"
+    WRONG = "wrong_password"
+    CORRUPT = "corrupt"
+
+    @property
+    def text(self) -> str:
+        """Human wording for the problem."""
+        if self is PasswordProblem.WRONG:
+            return "wrong password"
+        if self is PasswordProblem.CORRUPT:
+            return "local header is damaged"
+        return f"password required ({WAYS_TO_GIVE})"
+
+
+class PasswordPool:
+    """Passwords known so far, matched to members one at a time.
+
+    An archive with one password asks for it once; an archive whose members use
+    different passwords asks once per distinct password, because every accepted
+    password is remembered and tried on the next member first.  Answering with
+    nothing (or end of input) stops all further prompting for the run.
+    """
+
+    def __init__(
+        self,
+        known: list[bytes],
+        ctx: Context,
+        *,
+        can_prompt: bool,
+        prompt: Callable[[str], str] = prompt_password,
+    ) -> None:
+        self._known = list(known)
+        self._ctx = ctx
+        self._can_prompt = can_prompt
+        self._prompt = prompt
+
+    @staticmethod
+    def _status(zf: ZipFile, info: ZipInfo, password: bytes) -> PasswordStatus:
+        return zf.check_password(password, members=[info]).members[0].status
+
+    def resolve(self, zf: ZipFile, info: ZipInfo) -> bytes | PasswordProblem:
+        """Find the password for encrypted *info*, or say why there is none."""
+        tried = False
+        for password in self._known:
+            tried = True
+            status = self._status(zf, info, password)
+            if status is PasswordStatus.ACCEPTED:
+                return password
+            if status is PasswordStatus.CORRUPT:
+                return PasswordProblem.CORRUPT
+        if not self._can_prompt:
+            return PasswordProblem.WRONG if tried else PasswordProblem.MISSING
+
+        label = f"Password for {printable(info.filename)}: "
+        for attempt in range(MAX_PROMPT_ATTEMPTS):
+            text = self._prompt(label)
+            if not text:
+                # An empty answer (or end of input) means "stop asking".
+                self._can_prompt = False
+                return PasswordProblem.WRONG if tried else PasswordProblem.MISSING
+            tried = True
+            password = password_bytes(text)
+            status = self._status(zf, info, password)
+            if status is PasswordStatus.ACCEPTED:
+                self._known.insert(0, password)  # tried first on the next member
+                return password
+            if status is PasswordStatus.CORRUPT:
+                return PasswordProblem.CORRUPT
+            if attempt + 1 < MAX_PROMPT_ATTEMPTS:
+                self._ctx.err("ziplet: incorrect password, try again")
+        return PasswordProblem.WRONG
+
+
+def build_password_pool(
+    ctx: Context,
+    *,
+    file: str | None,
+    stdin: bool,
+    prompt: bool,
+    old: bool = False,
+) -> PasswordPool:
+    """Collect password sources from a file, standard input and the environment.
+
+    *prompt* is ``--password-prompt``: insist on asking at a terminal.
+    """
+    interactive = ctx.stdin.isatty()
+    if prompt:
+        require_tty_for_prompt(ctx)
+    known = static_passwords(ctx, file=file, stdin=stdin, old=old, use_env=not prompt)
+    return PasswordPool(known, ctx, can_prompt=interactive and not stdin)

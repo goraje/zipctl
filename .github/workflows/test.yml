@@ -166,4 +166,4 @@ jobs:
         run: uv sync
 
       - name: Run 7-Zip interoperability tests
-        run: uv run pytest -v -m windows tests/functional/test_7zip_interop.py
+        run: uv run pytest -v -m windows tests/functional/test_7zip_interop.py tests/functional/cli/test_7zip_cli.py

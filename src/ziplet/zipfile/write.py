@@ -50,6 +50,7 @@ class ZipWriteFile(io.BufferedIOBase):
         encryptor: BaseZipEncryptor | None = None,
         compression_registry: Registry = registry,
         reservation: WriterReservation | None = None,
+        raw: bool = False,
     ) -> None:
         """Initialise the write-file, emit the local header, and (if requested)
         the encryption header.
@@ -62,17 +63,28 @@ class ZipWriteFile(io.BufferedIOBase):
                 :meth:`BaseZipEncryptor.update_zipinfo` is called to patch
                 *zinfo* before the local header is written, and the
                 encryption header is written immediately afterwards.
+            raw: The data is already compressed (see :meth:`_write_raw`); the
+                CRC-32 and sizes come from *zinfo* and nothing is compressed.
         """
+        # Inert until fully built, so a failure below (say, an unusable
+        # compression level) does not make close() misbehave when the
+        # half-built object is finalised.
+        self._state = WriteState.CLOSED
         self._zinfo: ZipInfo = zinfo
         self._zip64: bool = zip64
         self._zipfile: ZipFile = zf
-        self._compressor: CompressorBase = compression_registry.get_compressor(
-            zinfo.compress_type, zinfo.compress_level
+        self._raw = raw
+        self._compressor: CompressorBase | None = (
+            None
+            if raw
+            else compression_registry.get_compressor(
+                zinfo.compress_type, zinfo.compress_level
+            )
         )
         self._encryptor: BaseZipEncryptor | None = encryptor
-        self._file_size: int = 0
+        self._file_size: int = zinfo.file_size if raw else 0
         self._compress_size: int = 0
-        self._crc: int = 0
+        self._crc: int = zinfo.CRC if raw else 0
         self._state = WriteState.ACTIVE
         self._error: BaseException | None = None
         self._reservation = reservation
@@ -146,6 +158,8 @@ class ZipWriteFile(io.BufferedIOBase):
         """
         if self.closed:
             raise ValueError("I/O operation on closed file.")
+        if self._compressor is None:
+            raise ValueError("a raw entry takes _write_raw, not write")
 
         # Accept any data that supports the buffer protocol
         if isinstance(data, (bytes, bytearray)):
@@ -165,6 +179,21 @@ class ZipWriteFile(io.BufferedIOBase):
         self._compress_size += len(raw)
         self._fileobj.write(raw)
         return nbytes
+
+    def _write_raw(self, data: bytes) -> None:
+        """Write already compressed *data*, encrypted if the entry is.
+
+        Only for an entry opened raw, where the CRC-32 and the uncompressed
+        size were given up front and are trusted, not checked.
+        """
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if not self._raw:
+            raise ValueError("_write_raw needs a raw entry")
+        if self._encryptor:
+            data = self._encryptor.encrypt(data)
+        self._compress_size += len(data)
+        _write_all(self._fileobj, data)
 
     def close(self) -> None:
         """Flush, finalise, and close the entry.
@@ -222,7 +251,7 @@ class ZipWriteFile(io.BufferedIOBase):
 
     def _write_final_payload(self) -> None:
         """Flush compression/encryption and write the final payload bytes."""
-        data = self._compressor.flush()
+        data = b"" if self._compressor is None else self._compressor.flush()
         if self._encryptor:
             data = self._encryptor.encrypt(data) + self._encryptor.flush()
         self._compress_size += len(data)

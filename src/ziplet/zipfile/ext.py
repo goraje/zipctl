@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from ziplet.compression import (
@@ -17,7 +17,7 @@ from ziplet.compression.methods import (
     DecompressorBase,
     StreamingDecompressor,
 )
-from ziplet.cryptography.aes import AesZipDecrypter
+from ziplet.cryptography.aes import AesKeyCache, AesZipDecrypter
 from ziplet.cryptography.zipcrypto import ZipCryptoDecrypter
 from ziplet.exceptions import BadZipFile, PasswordRequired
 from ziplet.zipfile.info import ZipInfo
@@ -73,6 +73,7 @@ class ZipExtFile(io.BufferedIOBase):
         close_fileobj: bool = False,
         pwd: bytes | None = None,
         compression_registry: Registry = registry,
+        key_cache: AesKeyCache | None = None,
     ) -> None:
         """Initialise a :class:`ZipExtFile` for reading a single ZIP entry.
 
@@ -88,6 +89,10 @@ class ZipExtFile(io.BufferedIOBase):
                 object is closed.  Defaults to ``False``.
             pwd (bytes | None): Decryption password.  Required when the entry
                 is encrypted; ignored otherwise.  Defaults to ``None``.
+            compression_registry (Registry): Where decompressors come from.
+            key_cache (AesKeyCache | None): Derived WZ-AES keys shared with
+                other entries of the same archive, so that a backward seek or
+                a second open does not derive them again.
 
         Raises:
             PasswordRequired: If the entry is encrypted but *pwd* is ``None``
@@ -105,6 +110,7 @@ class ZipExtFile(io.BufferedIOBase):
         self._close_fileobj = close_fileobj
         self._pwd = pwd
         self._compression_registry = compression_registry
+        self._key_cache = key_cache
 
         self._compress_type = zipinfo.compress_type
         self._orig_compress_left = zipinfo.compress_size
@@ -221,9 +227,12 @@ class ZipExtFile(io.BufferedIOBase):
             BadPassword: If the password verifier of the entry's decrypter
                 rejects the password.
         """
-        if self._decrypter_cls is not None:
-            return self._decrypter_cls(self._zinfo, **self._decrypter_kwargs())
-        return None
+        if self._decrypter_cls is None:
+            return None
+        kwargs = self._decrypter_kwargs()
+        if self._decrypter_cls is AesZipDecrypter:
+            kwargs["key_cache"] = self._key_cache
+        return self._decrypter_cls(self._zinfo, **kwargs)
 
     def _init_read_state(self) -> None:
         """(Re-)initialise all reading state.
@@ -257,15 +266,34 @@ class ZipExtFile(io.BufferedIOBase):
             BadZipFile: If the HMAC or CRC-32 does not match, or the entry is
                 truncated.
         """
-        decrypter = self._decrypter
-        try:
-            if isinstance(decrypter, AesZipDecrypter):
-                while self._compress_left > 0:
-                    self._read2(self.MAX_READ_SIZE)
-                decrypter.check_hmac(self._fileobj.read(decrypter.hmac_size))
-            else:
+        if isinstance(self._decrypter, AesZipDecrypter):
+            for _ in self._raw_chunks():
+                pass
+        else:
+            try:
                 while self.read(self.MAX_READ_SIZE):
                     pass
+            except EOFError:
+                raise BadZipFile(f"Truncated data for file {self.name!r}") from None
+
+    def _raw_chunks(self) -> Iterator[bytes]:
+        """Yield the entry's decrypted but still compressed bytes, to the end.
+
+        For copying an entry into another archive without compressing it
+        again.  Nothing is decompressed, so a plain or ZipCrypto entry is not
+        checked here; a WZ-AES entry has its HMAC checked after the last chunk.
+        Do not mix with :meth:`read`.
+
+        Raises:
+            BadZipFile: If the entry is truncated or its HMAC does not match.
+        """
+        try:
+            while self._compress_left > 0:
+                yield self._read2(self.MAX_READ_SIZE)
+            if isinstance(self._decrypter, AesZipDecrypter):
+                self._decrypter.check_hmac(
+                    self._fileobj.read(self._decrypter.hmac_size)
+                )
         except EOFError:
             raise BadZipFile(f"Truncated data for file {self.name!r}") from None
 

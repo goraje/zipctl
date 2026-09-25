@@ -34,6 +34,7 @@ __all__ = [
     "ZIP_MAX_COMMENT",
     "MASK_ENCRYPTED",
     "MASK_COMPRESS_OPTION_1",
+    "MASK_COMPRESS_OPTIONS",
     "MASK_COMPRESSED_PATCH",
     "MASK_STRONG_ENCRYPTION",
     "MASK_UTF_FILENAME",
@@ -88,6 +89,9 @@ ZIP_MAX_COMMENT = (1 << 16) - 1
 # ---------------------------------------------------------------------------
 MASK_ENCRYPTED = 1 << 0
 MASK_COMPRESS_OPTION_1 = 1 << 1
+# Bits 1 and 2: how the compressed stream was made (deflate level, LZMA end
+# marker). A raw copy carries them over from the source.
+MASK_COMPRESS_OPTIONS = 0b110
 MASK_COMPRESSED_PATCH = 1 << 5
 MASK_STRONG_ENCRYPTION = 1 << 6
 MASK_UTF_FILENAME = 1 << 11

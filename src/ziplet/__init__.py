@@ -30,6 +30,7 @@ from ziplet.zipfile.extract import (
 from ziplet.zipfile.file import (
     INHERIT_ENCRYPTION,
     EncryptionOverride,
+    PasswordProvider,
     ZipFile,
     ZipFileExtra,
     is_zipfile,
@@ -42,6 +43,14 @@ from ziplet.zipfile.password import (
     PasswordStatus,
 )
 from ziplet.zipfile.path import Path
+from ziplet.zipfile.policy_config import (
+    PolicyConfigError,
+    PolicyIssue,
+    policy_from_json,
+    policy_from_mapping,
+    policy_to_json,
+    policy_to_mapping,
+)
 from ziplet.zipfile.progress import ProgressCallback, ProgressEvent, ProgressPhase
 
 __all__ = [
@@ -78,11 +87,18 @@ __all__ = [
     "MemberPasswordCheck",
     "PasswordCheckResult",
     "PasswordError",
+    "PasswordProvider",
     "PasswordRequired",
     "PasswordStatus",
+    "PolicyConfigError",
+    "PolicyIssue",
     "ProgressCallback",
     "ProgressEvent",
     "ProgressPhase",
+    "policy_from_json",
+    "policy_from_mapping",
+    "policy_to_json",
+    "policy_to_mapping",
     "ExtractionContext",
     "OverwritePolicy",
     "ViolationAction",

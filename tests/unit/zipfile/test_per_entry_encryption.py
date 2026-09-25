@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -13,12 +14,18 @@ def test_mixed_per_entry_encryption_and_passwords(tmp_path: Path) -> None:
         zf.setpassword(b"default")
         zf.writestr("default.txt", b"default")
         zf.writestr("public.txt", b"public", encryption=None)
-        zf.writestr(
-            "legacy.txt",
-            b"legacy",
-            encryption=ziplet.ZIP_CRYPTO,
-            password=b"legacy-password",
-        )
+        # ZipCrypto checks a single header byte, so a wrong password can slip
+        # through 1 time in 256 and fail later as a CRC error.  Fix the random
+        # header bytes so the wrong-password read below is deterministic.
+        with patch(
+            "ziplet.cryptography.zipcrypto.os.urandom", return_value=b"\x00" * 11
+        ):
+            zf.writestr(
+                "legacy.txt",
+                b"legacy",
+                encryption=ziplet.ZIP_CRYPTO,
+                password=b"legacy-password",
+            )
         zf.writestr(
             "private.txt",
             b"private",

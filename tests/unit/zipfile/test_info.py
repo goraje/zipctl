@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import stat
 import struct
+from pathlib import Path
 
 import pytest
 
+from ziplet.cryptography import (
+    WZ_AES,
+    WZ_AES_V1,
+    WZ_AES_V2,
+    ZIP_CRYPTO,
+    wz_aes_stores_crc,
+)
 from ziplet.exceptions import BadZipFile
 from ziplet.zipfile.info import (
     WzAesExtra,
@@ -278,3 +287,97 @@ class TestZipInfoDecodeExtraWzAes:
         body = b"\x00" * 4
         zi.extra = struct.pack("<HH", 0xBEEF, 4) + body
         zi._decode_extra(0)  # should not raise
+
+
+class TestCarriedExtra:
+    @staticmethod
+    def _field(tag: int, body: bytes = b"\x00\x00") -> bytes:
+        return struct.pack("<HH", tag, len(body)) + body
+
+    def test_keeps_timestamps_and_drops_what_the_writer_builds_again(self) -> None:
+        timestamp = self._field(0x5455, b"\x01\x02\x03\x04\x05")
+        zi = ZipInfo()
+        zi.extra = (
+            self._field(0x0001, b"\x00" * 8)  # ZIP64
+            + timestamp
+            + self._field(0x9901, b"\x00" * 7)  # WinZip AES
+            + self._field(0x7075, b"\x01" + b"\x00" * 4)  # Unicode path
+        )
+        assert zi.carried_extra == timestamp
+
+    def test_no_extra_is_empty(self) -> None:
+        assert ZipInfo().carried_extra == b""
+
+    def test_a_malformed_tail_is_refused_not_dropped(self) -> None:
+        zi = ZipInfo()
+        zi.extra = self._field(0x5455) + b"\xff\xff"
+        with pytest.raises(BadZipFile):
+            _ = zi.carried_extra
+
+
+class TestEncryptionFacts:
+    @staticmethod
+    def _aes(version: int | None, strength: int | None = 3) -> ZipInfo:
+        zi = ZipInfo()
+        zi.flag_bits |= MASK_ENCRYPTED
+        zi.aes_extra = WzAesExtra(version, b"AE", strength)
+        return zi
+
+    def test_plain_entry(self) -> None:
+        zi = ZipInfo()
+        assert (zi.encryption_scheme, zi.aes_bits, zi.stores_crc) == (None, None, True)
+
+    def test_zipcrypto_entry_keeps_its_crc(self) -> None:
+        zi = ZipInfo()
+        zi.flag_bits |= MASK_ENCRYPTED
+        assert (zi.encryption_scheme, zi.aes_bits, zi.stores_crc) == (
+            ZIP_CRYPTO,
+            None,
+            True,
+        )
+
+    @pytest.mark.parametrize(("strength", "bits"), [(1, 128), (2, 192), (3, 256)])
+    def test_aes_strength_is_key_bits(self, strength: int, bits: int) -> None:
+        zi = self._aes(WZ_AES_V1, strength)
+        assert (zi.encryption_scheme, zi.aes_bits) == (WZ_AES, bits)
+
+    def test_unknown_aes_strength_has_no_bits(self) -> None:
+        zi = self._aes(WZ_AES_V1, 9)
+        assert (zi.encryption_scheme, zi.aes_bits) == (WZ_AES, None)
+
+    @pytest.mark.parametrize(
+        ("version", "stores"), [(WZ_AES_V1, True), (WZ_AES_V2, False), (None, False)]
+    )
+    def test_only_aes_1_stores_the_crc(self, version: int | None, stores: bool) -> None:
+        assert self._aes(version).stores_crc is stores
+        assert wz_aes_stores_crc(version) is stores
+
+
+class TestUnixMode:
+    def test_mode_and_symlink_come_from_the_high_attribute_bits(self) -> None:
+        zi = ZipInfo()
+        assert (zi.unix_mode, zi.is_symlink()) == (0, False)
+        zi.external_attr = (stat.S_IFLNK | 0o777) << 16 | 0x10
+        assert (zi.unix_mode, zi.is_symlink()) == (stat.S_IFLNK | 0o777, True)
+        zi.external_attr = (stat.S_IFREG | 0o644) << 16
+        assert (zi.unix_mode, zi.is_symlink()) == (stat.S_IFREG | 0o644, False)
+
+
+class TestFromFileFollowSymlinks:
+    @pytest.fixture
+    def link(self, tmp_path: Path) -> Path:
+        (tmp_path / "target.txt").write_bytes(b"x" * 100)
+        link = tmp_path / "link"
+        try:
+            link.symlink_to("target.txt")
+        except (OSError, NotImplementedError):
+            pytest.skip("symbolic links are not available")
+        return link
+
+    def test_follows_by_default(self, link: Path) -> None:
+        zi = ZipInfo.from_file(link)
+        assert (zi.file_size, zi.is_symlink()) == (100, False)
+
+    def test_describes_the_link_itself_on_request(self, link: Path) -> None:
+        zi = ZipInfo.from_file(link, follow_symlinks=False)
+        assert (zi.file_size, zi.is_symlink()) == (len("target.txt"), True)

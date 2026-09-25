@@ -6,7 +6,7 @@ import os
 import shutil
 import threading
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 from ziplet.compression import ZIP_LZMA, ZIP_STORED, Registry, registry
 from ziplet.cryptography import WZ_AES, ZIP_CRYPTO
-from ziplet.cryptography.aes import AesZipEncryptor
+from ziplet.cryptography.aes import AesKeyCache, AesZipEncryptor
 from ziplet.cryptography.zipcrypto import ZipCryptoEncryptor
 from ziplet.exceptions import BadZipFile, LargeZipFile, PasswordRequired
 from ziplet.zipfile.assessment import (
@@ -79,6 +79,7 @@ from ziplet.zipfile.records import (
 )
 from ziplet.zipfile.shared import (
     MASK_COMPRESS_OPTION_1,
+    MASK_COMPRESS_OPTIONS,
     MASK_ENCRYPTED,
     MASK_USE_DATA_DESCRIPTOR,
     ZIP64_LIMIT,
@@ -95,6 +96,7 @@ from ziplet.zipfile.write_coordinator import WriteCoordinator
 
 __all__ = [
     "ZipFile",
+    "PasswordProvider",
     "is_zipfile",
     "INHERIT_ENCRYPTION",
     "EncryptionOverride",
@@ -136,6 +138,19 @@ class _InheritEncryption:
 
 INHERIT_ENCRYPTION = _InheritEncryption()
 EncryptionOverride: TypeAlias = str | None | _InheritEncryption
+
+# Extraction can take one password for the whole archive, or a callable that is
+# asked for the password of each encrypted member (return None for "unknown").
+PasswordProvider: TypeAlias = Callable[[ZipInfo], bytes | None]
+
+
+def _password_for(
+    member: ZipInfo, pwd: bytes | PasswordProvider | None
+) -> bytes | None:
+    """Resolve *pwd* for *member*; a provider is asked only for encrypted members."""
+    if pwd is None or isinstance(pwd, bytes):
+        return pwd
+    return pwd(member) if member.is_encrypted else None
 
 
 def is_zipfile(filename: StrPath | IO[bytes]) -> bool:
@@ -292,6 +307,7 @@ class ZipFile:
         self._file_ref_cnt = 1
         self._lock = threading.RLock()
         self._write_coordinator = WriteCoordinator(self._lock)
+        self._aes_keys = AesKeyCache()
         self._seekable = True
         self._compression_registry = selected_registry
 
@@ -756,7 +772,13 @@ class ZipFile:
                 pwd = None
 
             return ZipExtFile(
-                zef_file, mode, zinfo, True, pwd, self._compression_registry
+                zef_file,
+                mode,
+                zinfo,
+                True,
+                pwd,
+                self._compression_registry,
+                self._aes_keys,
             )
         except BaseException:
             zef_file.close()
@@ -770,6 +792,7 @@ class ZipFile:
         encryption: EncryptionOverride = INHERIT_ENCRYPTION,
         password: bytes | None = None,
         extra: ZipFileExtra | None = None,
+        raw: bool = False,
     ) -> ZipWriteFile:
         """Open *zinfo* for writing and return a ZipWriteFile.
 
@@ -782,6 +805,9 @@ class ZipFile:
                 flags, ``header_offset``).
             force_zip64: When ``True``, force ZIP64 local header fields
                 regardless of file size.
+            raw: The entry takes compressed data (:meth:`_copy_raw`): *zinfo*
+                keeps its CRC, sizes and compression option bits, and its
+                ``compress_size`` says how much is coming.
 
         Returns:
             A :class:`~ziplet.zipfile.write.ZipWriteFile` ready to
@@ -799,12 +825,15 @@ class ZipFile:
             )
         reservation = self._write_coordinator.reserve()
         try:
+            coming = zinfo.compress_size
             zinfo.compress_size = 0
-            zinfo.CRC = 0
-
-            zinfo.flag_bits = 0x00
-            if zinfo.compress_type == ZIP_LZMA:
-                zinfo.flag_bits |= MASK_COMPRESS_OPTION_1
+            if raw:
+                zinfo.flag_bits &= MASK_COMPRESS_OPTIONS
+            else:
+                zinfo.CRC = 0
+                zinfo.flag_bits = 0x00
+                if zinfo.compress_type == ZIP_LZMA:
+                    zinfo.flag_bits |= MASK_COMPRESS_OPTION_1
             if not self._seekable:
                 zinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
 
@@ -813,6 +842,8 @@ class ZipFile:
 
             zip64 = force_zip64 or (
                 zinfo.file_size + zinfo.file_size // 20 > ZIP64_LIMIT
+                # the encryption adds a few bytes of its own to what is coming
+                or (raw and coming + 64 > ZIP64_LIMIT)
             )
             if not self._allow_zip64 and zip64:
                 raise LargeZipFile("Filesize would require ZIP64 extensions")
@@ -841,18 +872,67 @@ class ZipFile:
                 )
 
             return ZipWriteFile(
-                self, zinfo, zip64, encryptor, self._compression_registry, reservation
+                self,
+                zinfo,
+                zip64,
+                encryptor,
+                self._compression_registry,
+                reservation,
+                raw,
             )
         except BaseException:
             self._write_coordinator.release(reservation)
             raise
+
+    def _copy_raw(
+        self,
+        source: ZipFile,
+        info: ZipInfo,
+        zinfo: ZipInfo,
+        *,
+        crc: int,
+        size: int,
+        pwd: bytes | None = None,
+        encryption: EncryptionOverride = INHERIT_ENCRYPTION,
+        password: bytes | None = None,
+        extra: ZipFileExtra | None = None,
+    ) -> None:
+        """Copy member *info* of *source* into this archive as *zinfo*, without
+        decompressing or compressing it.
+
+        The compressed bytes are decrypted with *pwd* and written again under
+        *encryption* and *password*, so a copy that keeps the compression stays
+        byte for byte the same inside.  Nothing is decompressed, so the caller
+        vouches for *crc* and *size* (the CRC-32 and length of the uncompressed
+        data); a plain or ZipCrypto member is not checked here at all.  The
+        entry keeps *info*'s compression method and compression option bits.
+        ``zinfo`` needs the filename, date and attributes; its compression,
+        sizes and option bits are set here.
+
+        Private, but a contract for ziplet's own copy commands (``encrypt``,
+        ``decrypt`` and ``rewrite``); ``tests/unit/zipfile/test_raw_copy.py``
+        pins it.
+        """
+        zinfo.compress_type = info.compress_type
+        zinfo.flag_bits = info.flag_bits
+        zinfo.compress_size = info.compress_size
+        zinfo.CRC = crc
+        zinfo.file_size = size
+        with (
+            cast(ZipExtFile, source.open(info, "r", pwd)) as reader,
+            self._open_to_write(
+                zinfo, encryption=encryption, password=password, extra=extra, raw=True
+            ) as writer,
+        ):
+            for chunk in reader._raw_chunks():
+                writer._write_raw(chunk)
 
     @overload
     def extract(
         self,
         member: str | ZipInfo,
         path: StrPath | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: None = None,
         progress: ProgressCallback | None = None,
@@ -863,7 +943,7 @@ class ZipFile:
         self,
         member: str | ZipInfo,
         path: StrPath | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: ExtractPolicy,
         progress: ProgressCallback | None = None,
@@ -873,7 +953,7 @@ class ZipFile:
         self,
         member: str | ZipInfo,
         path: StrPath | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: ExtractPolicy | None = None,
         progress: ProgressCallback | None = None,
@@ -885,7 +965,9 @@ class ZipFile:
                 :class:`~ziplet.zipfile.info.ZipInfo` instance.
             path: Destination directory. Defaults to the current working
                 directory when ``None``.
-            pwd: Decryption password, or ``None`` to use :attr:`pwd`.
+            pwd: Decryption password, or a callable given each encrypted
+                member's :class:`~ziplet.zipfile.info.ZipInfo` that returns
+                its password (or ``None``). ``None`` uses :attr:`pwd`.
             policy: Opt-in extraction policy; see :class:`ExtractPolicy`.
             progress: Callback receiving a :class:`ProgressEvent` as the
                 member starts, as its data is written, and when it finishes.
@@ -910,7 +992,7 @@ class ZipFile:
         self,
         path: StrPath | None = None,
         members: Iterable[str | ZipInfo] | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: None = None,
         progress: ProgressCallback | None = None,
@@ -921,7 +1003,7 @@ class ZipFile:
         self,
         path: StrPath | None = None,
         members: Iterable[str | ZipInfo] | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: ExtractPolicy,
         progress: ProgressCallback | None = None,
@@ -931,7 +1013,7 @@ class ZipFile:
         self,
         path: StrPath | None = None,
         members: Iterable[str | ZipInfo] | None = None,
-        pwd: bytes | None = None,
+        pwd: bytes | PasswordProvider | None = None,
         *,
         policy: ExtractPolicy | None = None,
         progress: ProgressCallback | None = None,
@@ -944,7 +1026,9 @@ class ZipFile:
             members: Iterable of member names or
                 :class:`~ziplet.zipfile.info.ZipInfo` instances to
                 extract. Defaults to all members when ``None``.
-            pwd: Decryption password, or ``None`` to use :attr:`pwd`.
+            pwd: Decryption password, or a callable given each encrypted
+                member's :class:`~ziplet.zipfile.info.ZipInfo` that returns
+                its password (or ``None``). ``None`` uses :attr:`pwd`.
             policy: Opt-in extraction policy; see :class:`ExtractPolicy`.
             progress: Callback receiving a :class:`ProgressEvent` as each
                 member starts, as its data is written, and when it finishes.
@@ -955,7 +1039,8 @@ class ZipFile:
                 before anything is written.
         """
         if members is None:
-            members = self.namelist()
+            # Entries rather than names, so duplicate names keep their own data.
+            members = list(self.filelist)
         if policy is not None:
             result = self._extract_with_policy(
                 list(members), path, pwd, policy, progress
@@ -975,7 +1060,7 @@ class ZipFile:
         self,
         members: list[str | ZipInfo],
         path: str,
-        pwd: bytes | None,
+        pwd: bytes | PasswordProvider | None,
         progress: ProgressCallback,
     ) -> list[Path]:
         infos = [m if isinstance(m, ZipInfo) else self.getinfo(m) for m in members]
@@ -995,7 +1080,7 @@ class ZipFile:
         self,
         members: list[str | ZipInfo],
         path: StrPath | None,
-        pwd: bytes | None,
+        pwd: bytes | PasswordProvider | None,
         policy: ExtractPolicy,
         progress: ProgressCallback | None = None,
     ) -> ExtractResult:
@@ -1038,7 +1123,7 @@ class ZipFile:
         self,
         member: str | ZipInfo,
         destination: str,
-        pwd: bytes | None,
+        pwd: bytes | PasswordProvider | None,
         *,
         target_override: Path | None = None,
         quota: ExtractionQuota | None = None,
@@ -1082,7 +1167,7 @@ class ZipFile:
         return materialize_member(
             member,
             targetpath,
-            lambda: self.open(member, pwd=pwd),
+            lambda: self.open(member, pwd=_password_for(member, pwd)),
             destination,
             quota,
             fsync=fsync,
@@ -1270,6 +1355,9 @@ class ZipFile:
             zinfo = zinfo_or_directory_name
             if not zinfo.is_dir():
                 raise ValueError("The given ZipInfo does not describe a directory")
+            zinfo.compress_size = 0
+            zinfo.CRC = 0
+            zinfo.file_size = 0
         elif isinstance(zinfo_or_directory_name, str):
             directory_name = zinfo_or_directory_name
             if not directory_name.endswith("/"):
@@ -1334,6 +1422,7 @@ class ZipFile:
                         self.fp.seek(self.start_dir)
                     self._write_end_record()
         finally:
+            self._aes_keys.clear()
             fp = self.fp
             self.fp = None
             self._fpclose(fp)

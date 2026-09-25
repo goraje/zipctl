@@ -167,6 +167,7 @@ class ExtractResult:
     failed_count: int
     bytes_written: int
     preview_only: bool
+    previewed_count: int = 0  # members a dry run would extract; not in *skipped_count*
 
 
 class ExtractionError(Exception):
