@@ -12,6 +12,13 @@ Upstream sources
    Copyright (c) 2017 Daniel Hillier
    Retained license text: `licenses/pyzipper-MIT.txt`
 
+3. JetBrains Mono Bold (lettering in `assets/ziplet-logo.svg`, converted to
+   outlines; the font itself is not distributed)
+   Copyright 2020 The JetBrains Mono Project Authors
+   (https://github.com/JetBrains/JetBrainsMono)
+   Retained license text: `licenses/JetBrainsMono-OFL.txt` (SIL Open Font
+   License 1.1)
+
 Brief summary of changes made to the CPython-derived code
 ---------------------------------------------------------
 
