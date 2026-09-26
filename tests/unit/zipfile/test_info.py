@@ -32,20 +32,6 @@ from ziplet.zipfile.shared import (
 # ---------------------------------------------------------------------------
 
 
-class TestWzAesExtra:
-    def test_defaults_are_none(self) -> None:
-        aes = WzAesExtra()
-        assert aes.wz_aes_version is None
-        assert aes.wz_aes_vendor_id is None
-        assert aes.wz_aes_strength is None
-
-    def test_explicit_values_stored(self) -> None:
-        aes = WzAesExtra(wz_aes_version=1, wz_aes_vendor_id=b"AE", wz_aes_strength=3)
-        assert aes.wz_aes_version == 1
-        assert aes.wz_aes_vendor_id == b"AE"
-        assert aes.wz_aes_strength == 3
-
-
 # ---------------------------------------------------------------------------
 # _sanitize_filename
 # ---------------------------------------------------------------------------

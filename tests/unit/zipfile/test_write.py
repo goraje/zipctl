@@ -132,15 +132,19 @@ class TestZipWriteFile:
         ):
             zwf.close()
 
-    def test_close_uses_data_descriptor_when_flag_set(self) -> None:
+    @pytest.mark.parametrize("use_descriptor", [False, True])
+    def test_close_writes_data_descriptor_only_when_flag_set(
+        self, use_descriptor: bool
+    ) -> None:
         parent = _make_parent()
         zinfo = _make_zinfo("dd.txt")
-        zinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
+        if use_descriptor:
+            zinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
 
         with ZipWriteFile(cast(Any, parent), zinfo, zip64=False) as zwf:
             zwf.write(b"abc")
 
-        assert parent.start_dir > 0
+        assert (b"PK\x07\x08" in parent.fp.getvalue()) is use_descriptor
 
     def test_finalization_failure_marks_writer_failed(self) -> None:
         parent = _make_parent()

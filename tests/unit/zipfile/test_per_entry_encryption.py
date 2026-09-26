@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 import ziplet
+from ziplet.exceptions import BadPassword
 
 
 def test_mixed_per_entry_encryption_and_passwords(tmp_path: Path) -> None:
@@ -40,7 +41,7 @@ def test_mixed_per_entry_encryption_and_passwords(tmp_path: Path) -> None:
         assert zf.read("public.txt") == b"public"
         assert zf.read("legacy.txt", pwd=b"legacy-password") == b"legacy"
         assert zf.read("private.txt", pwd=b"private-password") == b"private"
-        with pytest.raises(RuntimeError):
+        with pytest.raises(BadPassword):
             zf.read("legacy.txt")
 
 

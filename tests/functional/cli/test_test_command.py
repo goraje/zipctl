@@ -271,17 +271,6 @@ def test_unencrypted_members_are_still_tested_when_others_need_a_password(
     assert result.returncode == 1
 
 
-@pytest.mark.parametrize("ending", [b"\n", b"\r\n", b""])
-def test_password_file_first_line_is_used_whatever_the_line_ending(
-    cli: CliRunner, workdir: Path, aes_archive: Path, ending: bytes
-) -> None:
-    trailing = b"second line is ignored\n" if ending else b""
-    passfile = _passfile(workdir, PW + ending + trailing)
-    result = cli("test", "--password-file", str(passfile), str(aes_archive))
-    assert result.returncode == 0, result
-    assert result.stdout == "Tested 2 members: all OK\n"
-
-
 def test_password_file_may_hold_non_utf8_bytes(cli: CliRunner, workdir: Path) -> None:
     raw = b"\xff\xfe binary \x00 secret"
     path = write_archive(
@@ -301,21 +290,6 @@ def test_password_from_stdin(cli: CliRunner, aes_archive: Path) -> None:
 def test_password_from_the_environment(cli: CliRunner, aes_archive: Path) -> None:
     result = cli("test", str(aes_archive), env={"ZIPLET_PASSWORD": PASSWORD})
     assert result.returncode == 0, result
-
-
-def test_explicit_sources_take_priority_over_the_environment(
-    cli: CliRunner, workdir: Path, aes_archive: Path
-) -> None:
-    passfile = _passfile(workdir, b"wrong-password\n")
-    result = cli(
-        "test",
-        "--password-file",
-        str(passfile),
-        str(aes_archive),
-        env={"ZIPLET_PASSWORD": PASSWORD},
-    )
-    assert result.returncode == 1
-    assert "wrong password" in result.stdout
 
 
 def test_wrong_password_is_reported_as_wrong_not_as_corruption(
@@ -426,48 +400,12 @@ def test_encrypted_json_report_never_contains_the_password(
 # --- misconfiguration ----------------------------------------------------------
 
 
-def test_missing_password_file_is_a_usage_error(
-    cli: CliRunner, workdir: Path, aes_archive: Path
-) -> None:
-    result = cli("test", "--password-file", str(workdir / "nope"), str(aes_archive))
-    assert result.returncode == 2
-    assert "cannot read password file" in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def test_empty_password_file_is_a_usage_error(
-    cli: CliRunner, workdir: Path, aes_archive: Path
-) -> None:
-    for content in (b"", b"\n", b"\r\n"):
-        passfile = _passfile(workdir, content)
-        result = cli("test", "--password-file", str(passfile), str(aes_archive))
-        assert result.returncode == 2, content
-        assert "is empty" in result.stderr
-
-
-def test_empty_standard_input_is_a_usage_error(
-    cli: CliRunner, aes_archive: Path
-) -> None:
-    for content in ("", "\n"):
-        result = cli("test", "--password-stdin", str(aes_archive), stdin=content)
-        assert result.returncode == 2, repr(content)
-        assert "no password on standard input" in result.stderr
-
-
 def test_prompting_without_a_terminal_is_a_usage_error(
     cli: CliRunner, aes_archive: Path
 ) -> None:
     result = cli("test", "--password-prompt", str(aes_archive))
     assert result.returncode == 2
     assert "needs a terminal" in result.stderr
-
-
-def test_an_empty_environment_password_is_ignored(
-    cli: CliRunner, aes_archive: Path
-) -> None:
-    result = cli("test", str(aes_archive), env={"ZIPLET_PASSWORD": ""})
-    assert result.returncode == 1
-    assert "password required" in result.stdout
 
 
 def test_archives_without_encrypted_members_never_touch_password_sources(

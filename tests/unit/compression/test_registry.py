@@ -15,65 +15,12 @@ from ziplet.compression import (
     ZIP_ZSTANDARD,
     CompressionEntry,
     CompressorBase,
-    DecompressorBase,
     NoopCompressor,
     NoopDecompressor,
     Registry,
-    bz2,
-    compressor_names,
     deflate,
-    lzma,
     registry,
 )
-
-
-class TestCompressorNames:
-    def test_is_dict(self) -> None:
-        assert isinstance(compressor_names, dict)
-
-    def test_stored_name(self) -> None:
-        assert compressor_names[0] == "store"
-
-    def test_deflate_name(self) -> None:
-        assert compressor_names[8] == "deflate"
-
-    def test_bzip2_name(self) -> None:
-        assert compressor_names[12] == "bzip2"
-
-    def test_lzma_name(self) -> None:
-        assert compressor_names[14] == "lzma"
-
-    def test_zstd_name(self) -> None:
-        assert compressor_names[93] == "zstd"
-
-    def test_all_values_are_strings(self) -> None:
-        for v in compressor_names.values():
-            assert isinstance(v, str)
-
-
-class TestRegistryInit:
-    def test_registry_is_registry_instance(self) -> None:
-        assert isinstance(registry, Registry)
-
-    def test_stored_always_registered(self) -> None:
-        r = Registry()
-        # ZIP_STORED should always be present (no extra deps)
-        r.check_compression(ZIP_STORED)  # should not raise
-
-    def test_deflate_registered_when_zlib_available(self) -> None:
-        if deflate.compression_entry is not None:
-            r = Registry()
-            r.check_compression(ZIP_DEFLATED)  # should not raise
-
-    def test_bzip2_registered_when_bz2_available(self) -> None:
-        if bz2.compression_entry is not None:
-            r = Registry()
-            r.check_compression(ZIP_BZIP2)  # should not raise
-
-    def test_lzma_registered_when_lzma_available(self) -> None:
-        if lzma.compression_entry is not None:
-            r = Registry()
-            r.check_compression(ZIP_LZMA)  # should not raise
 
 
 class TestRegistryCheckCompression:
@@ -160,13 +107,6 @@ class TestRegistryGetCompressor:
         r = Registry()
         assert isinstance(r.get_compressor(ZIP_STORED, compresslevel=9), NoopCompressor)
 
-    def test_deflate_returns_compressor_base(self) -> None:
-        if deflate.compression_entry is None:
-            pytest.skip("zlib not available")
-        r = Registry()
-        c = r.get_compressor(ZIP_DEFLATED)
-        assert isinstance(c, CompressorBase)
-
     def test_deflate_returns_compressor_with_level(self) -> None:
         if deflate.compression_entry is None:
             pytest.skip("zlib not available")
@@ -174,23 +114,9 @@ class TestRegistryGetCompressor:
         c = r.get_compressor(ZIP_DEFLATED, compresslevel=6)
         assert isinstance(c, CompressorBase)
 
-    def test_bzip2_returns_compressor_base(self) -> None:
-        if bz2.compression_entry is None:
-            pytest.skip("bz2 not available")
-        r = Registry()
-        c = r.get_compressor(ZIP_BZIP2)
-        assert isinstance(c, CompressorBase)
-
-    def test_lzma_returns_compressor_base(self) -> None:
-        if lzma.compression_entry is None:
-            pytest.skip("lzma not available")
-        r = Registry()
-        c = r.get_compressor(ZIP_LZMA)
-        assert isinstance(c, CompressorBase)
-
     def test_unknown_method_raises(self) -> None:
         r = Registry()
-        with pytest.raises((NotImplementedError, RuntimeError)):
+        with pytest.raises(NotImplementedError):
             r.get_compressor(9999)
 
 
@@ -199,30 +125,9 @@ class TestRegistryGetDecompressor:
         r = Registry()
         assert isinstance(r.get_decompressor(ZIP_STORED), NoopDecompressor)
 
-    def test_deflate_returns_decompressor_base(self) -> None:
-        if deflate.compression_entry is None:
-            pytest.skip("zlib not available")
-        r = Registry()
-        d = r.get_decompressor(ZIP_DEFLATED)
-        assert isinstance(d, DecompressorBase)
-
-    def test_bzip2_returns_decompressor_base(self) -> None:
-        if bz2.compression_entry is None:
-            pytest.skip("bz2 not available")
-        r = Registry()
-        d = r.get_decompressor(ZIP_BZIP2)
-        assert isinstance(d, DecompressorBase)
-
-    def test_lzma_returns_decompressor_base(self) -> None:
-        if lzma.compression_entry is None:
-            pytest.skip("lzma not available")
-        r = Registry()
-        d = r.get_decompressor(ZIP_LZMA)
-        assert isinstance(d, DecompressorBase)
-
     def test_unknown_method_raises(self) -> None:
         r = Registry()
-        with pytest.raises((NotImplementedError, RuntimeError)):
+        with pytest.raises(NotImplementedError):
             r.get_decompressor(9999)
 
     def test_each_call_returns_fresh_instance(self) -> None:

@@ -88,7 +88,10 @@ def test_large_member_reports_byte_progress(small_step: None, tmp_path: Path) ->
 
 
 @posix_only
-def test_symlinks_and_directories_have_no_byte_progress(tmp_path: Path) -> None:
+def test_symlinks_and_directories_have_no_byte_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(progress, "_PROGRESS_STEP", 1)
     link = ZipInfo("link")
     link.external_attr = (stat.S_IFLNK | 0o777) << 16
     buffer = io.BytesIO()

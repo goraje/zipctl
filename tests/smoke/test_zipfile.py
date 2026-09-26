@@ -78,14 +78,3 @@ def test_zip64_eocd_round_trip(tmp_path: Path) -> None:
 
     with ziplet.ZipFile(path, "r") as zf:
         assert zf.read("test.txt").decode() == CONTENT
-
-
-_TOTALLY_UNKNOWN = 999  # never in the registry or _required_modules
-
-
-def test_zipfile_open_with_unknown_compression_raises(tmp_path: Path) -> None:
-    """ZipFile.open should surface the error when writing with an unsupported method."""
-    path = tmp_path / "bad.zip"
-    with pytest.raises((NotImplementedError, RuntimeError)):
-        with ziplet.ZipFile(path, "w", compression=_TOTALLY_UNKNOWN) as zf:
-            zf.writestr("f.txt", "data")

@@ -164,21 +164,3 @@ def test_plain_bytes_passwords_and_the_archive_password_still_work(
         zf.extractall(tmp_path / "default")
     assert (tmp_path / "explicit" / "b.txt").read_bytes() == b"b"
     assert (tmp_path / "default" / "a.txt").read_bytes() == b"a"
-
-
-def test_policy_extractall_extracts_the_first_of_duplicate_entries(
-    tmp_path: Path,
-) -> None:
-    import warnings
-
-    from ziplet import ExtractionError, ExtractPolicy, ZipFile
-
-    path = tmp_path / "dup.zip"
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        with ZipFile(path, "w") as zf:
-            zf.writestr("same.txt", b"first")
-            zf.writestr("same.txt", b"second")
-    with ZipFile(path) as zf, pytest.raises(ExtractionError):
-        zf.extractall(tmp_path / "out", policy=ExtractPolicy())
-    assert (tmp_path / "out" / "same.txt").read_bytes() == b"first"

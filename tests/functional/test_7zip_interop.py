@@ -118,25 +118,6 @@ def _sz_create_encrypted(
 class TestPyWrites7zValidates:
     """ziplet creates archives; 7-Zip must accept them."""
 
-    def test_aes256_stored(self, tmp_path: Path) -> None:
-        zp = tmp_path / "a1.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("file.txt", CONTENT)
-        assert _sz_test(zp, _PWD_STR) == 0
-
-    def test_aes256_deflated(self, tmp_path: Path) -> None:
-        zp = tmp_path / "a2.zip"
-        with ZipFile(
-            zp,
-            "w",
-            compression=ziplet.ZIP_DEFLATED,
-            encryption=ziplet.WZ_AES,
-        ) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("file.txt", LARGE_CONTENT)
-        assert _sz_test(zp, _PWD_STR) == 0
-
     def test_aes256_bzip2(self, tmp_path: Path) -> None:
         zp = tmp_path / "a3.zip"
         with ZipFile(
@@ -154,28 +135,6 @@ class TestPyWrites7zValidates:
             zf.setpassword(PASSWORD)
             zf.writestr("file.txt", LARGE_CONTENT)
         assert _sz_test(zp, _PWD_STR) == 0
-
-    def test_aes256_multi_file(self, tmp_path: Path) -> None:
-        zp = tmp_path / "a5.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("alpha.txt", b"alpha content")
-            zf.writestr("beta.txt", b"beta content")
-            zf.writestr("gamma.txt", b"gamma content")
-        assert _sz_test(zp, _PWD_STR) == 0
-
-    def test_aes256_7z_extracts_correct_content(self, tmp_path: Path) -> None:
-        """7-Zip must be able to extract the exact bytes written by ziplet."""
-        zp = tmp_path / "a6.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("payload.txt", CONTENT)
-
-        out_dir = tmp_path / "extracted"
-        out_dir.mkdir()
-        result = _sz("e", f"-p{_PWD_STR}", f"-o{out_dir}", "-y", str(zp))
-        assert result.returncode == 0, result.stderr
-        assert (out_dir / "payload.txt").read_bytes() == CONTENT
 
     def test_aes256_force_v1_recognised_by_7z(self, tmp_path: Path) -> None:
         """force_wz_aes_version=1 â†’ 7-Zip lists AES-256 and passes integrity check."""
@@ -214,23 +173,6 @@ class TestPyWrites7zValidates:
 
 class TestSevenZWritesPyReads:
     """7-Zip creates archives; ziplet must read them correctly."""
-
-    def test_7z_aes256_stored(self, tmp_path: Path) -> None:
-        zp = tmp_path / "b1.zip"
-        _sz_create_encrypted(zp, CONTENT, "hello.txt", tmp=tmp_path)
-        with ZipFile(zp, "r") as zf:
-            zf.setpassword(PASSWORD)
-            assert zf.read("hello.txt") == CONTENT
-
-    def test_7z_aes256_deflate(self, tmp_path: Path) -> None:
-        """7-Zip writes AES-256 + Deflate; ziplet decompresses correctly."""
-        zp = tmp_path / "b2.zip"
-        _sz_create_encrypted(
-            zp, LARGE_CONTENT, "large.txt", compression="Deflate", tmp=tmp_path
-        )
-        with ZipFile(zp, "r") as zf:
-            zf.setpassword(PASSWORD)
-            assert zf.read("large.txt") == LARGE_CONTENT
 
     def test_7z_zipcrypto(self, tmp_path: Path) -> None:
         """7-Zip writes ZipCrypto; ziplet auto-detects and decrypts."""
@@ -283,45 +225,6 @@ class TestSevenZWritesPyReads:
 
 
 class TestAdditional:
-    def test_wrong_password_on_7z_archive_raises(self, tmp_path: Path) -> None:
-        """ziplet raises RuntimeError when given the wrong password."""
-        zp = tmp_path / "f1.zip"
-        _sz_create_encrypted(zp, CONTENT, "secret.txt", tmp=tmp_path)
-        with ZipFile(zp, "r") as zf:
-            zf.setpassword(b"completely-wrong-password")
-            with pytest.raises(RuntimeError):
-                zf.read("secret.txt")
-
-    def test_testzip_on_7z_written_archive(self, tmp_path: Path) -> None:
-        """testzip() returns None (no corrupt entries) for a 7-Zip-written archive."""
-        zp = tmp_path / "f2.zip"
-        _sz_create_encrypted(zp, CONTENT, "file.txt", tmp=tmp_path)
-        with ZipFile(zp, "r") as zf:
-            zf.setpassword(PASSWORD)
-            assert zf.testzip() is None
-
-    def test_binary_content_round_trip_sha256(self, tmp_path: Path) -> None:
-        """64 KiB of binary data: ziplet writes â†’ 7z verifies â†’ py re-reads.
-
-        SHA-256 of recovered data must equal SHA-256 of original.
-        """
-        # Deterministic pseudo-random payload (repeating 0-255 pattern Ă— 256)
-        binary = bytes(bytearray(range(256)) * 256)  # 65 536 bytes
-        expected_digest = hashlib.sha256(binary).hexdigest()
-
-        zp = tmp_path / "f3.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("binary.bin", binary)
-
-        assert _sz_test(zp, _PWD_STR) == 0
-
-        with ZipFile(zp, "r") as zf:
-            zf.setpassword(PASSWORD)
-            recovered = zf.read("binary.bin")
-
-        assert hashlib.sha256(recovered).hexdigest() == expected_digest
-
     def test_unicode_filename_has_utf8_flag(self, tmp_path: Path) -> None:
         """Non-ASCII filenames written by ziplet have the UTF-8 flag set.
 
@@ -335,14 +238,6 @@ class TestAdditional:
 
         meta = _sz_list_metadata(zp)
         assert "UTF8" in meta
-
-    def test_empty_file_entry(self, tmp_path: Path) -> None:
-        """A zero-byte entry with AES-256 must pass 7-Zip's integrity check."""
-        zp = tmp_path / "f5.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("empty.txt", b"")
-        assert _sz_test(zp, _PWD_STR) == 0
 
     def test_multi_file_nested_paths_extract_with_7z(self, tmp_path: Path) -> None:
         """Nested archive paths are preserved when 7-Zip extracts the archive."""

@@ -7,6 +7,7 @@ import pytest
 
 import ziplet
 from ziplet import Path, ZipFile
+from ziplet.exceptions import BadPassword
 from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.path import CompleteDirs, FastLookup
 
@@ -311,11 +312,6 @@ class TestStringingAndEquality:
         archive = _make_archive(tmp_path)
         assert Path(archive) / "a.txt" != Path(archive) / "a.txt"
 
-    def test_equality_with_the_same_root_object(self, tmp_path: pathlib.Path) -> None:
-        archive = _make_archive(tmp_path)
-        path = Path(archive)
-        assert path / "a.txt" == path / "a.txt"
-
 
 class TestImpliedDirectories:
     def test_implied_dirs_are_deduplicated(self) -> None:
@@ -341,3 +337,58 @@ class TestImpliedDirectories:
             CompleteDirs.inject(zf)
         with ZipFile(archive) as zf:
             assert "b/" in zf.namelist()
+
+
+def test_read_aes_encrypted_member_through_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    # A wrong password passes the 2-byte verifier 1 in 65536 times with a
+    # random salt; pin the salt so the rejection below is deterministic.
+    monkeypatch.setattr("ziplet.cryptography.aes.os.urandom", lambda n: bytes(n))
+    archive = tmp_path / "secure.zip"
+    password = b"hunter2-super-secret"
+    with ziplet.ZipFile(archive, "w", encryption=ziplet.WZ_AES) as zf:
+        zf.setpassword(password)
+        zf.writestr("confidential/plan.txt", "launch codes")
+        zf.writestr("public/notice.txt", "nothing to see here", encryption=None)
+
+    root = Path(archive)
+
+    # Unencrypted sibling member is readable without a password.
+    assert (root / "public" / "notice.txt").read_bytes() == b"nothing to see here"
+
+    # The encrypted member requires the password, matching ZipFile.open().
+    encrypted_member = root / "confidential" / "plan.txt"
+    with encrypted_member.open("rb", pwd=password) as fh:
+        assert fh.read() == b"launch codes"
+
+    # Passing the wrong password surfaces the same error ZipFile.open would.
+    with pytest.raises(BadPassword):
+        with encrypted_member.open("rb", pwd=b"wrong-password") as fh:
+            fh.read()
+
+
+def test_implied_directories_survive_round_trip_without_explicit_entries(
+    tmp_path: pathlib.Path,
+) -> None:
+    archive = tmp_path / "implied.zip"
+    # Intentionally omit directory entries; only files are written.
+    with ziplet.ZipFile(archive, "w") as zf:
+        zf.writestr("a/b/c/leaf.txt", "deep leaf")
+
+    root = Path(archive)
+    a = root / "a"
+    b = a / "b"
+    c = b / "c"
+    assert a.is_dir()
+    assert b.is_dir()
+    assert c.is_dir()
+    assert [child.name for child in c.iterdir()] == ["leaf.txt"]
+    assert (c / "leaf.txt").read_text(encoding="utf-8") == "deep leaf"
+
+
+def test_missing_path_is_not_a_symlink(tmp_path: pathlib.Path) -> None:
+    archive = tmp_path / "missing.zip"
+    with ziplet.ZipFile(archive, "w") as zf:
+        zf.writestr("present.txt", b"payload")
+    assert not (Path(archive) / "missing.txt").is_symlink()

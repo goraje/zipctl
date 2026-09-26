@@ -6,6 +6,7 @@ They validate ZIP64 behavior end-to-end (ziplet, stdlib, and 7-Zip).
 
 from __future__ import annotations
 
+import shutil
 import struct
 import subprocess
 import zipfile as _stdlib_zipfile
@@ -18,6 +19,7 @@ from ziplet import ZipFile
 from ziplet.exceptions import LargeZipFile
 from ziplet.zipfile import file as file_mod
 from ziplet.zipfile import info as info_mod
+from ziplet.zipfile import records as records_mod
 from ziplet.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_SIZE,
@@ -29,20 +31,16 @@ from ziplet.zipfile.shared import (
     FILE_HEADER_STRUCT,
 )
 
-SZ_EXE = Path(r"C:\Program Files\7-Zip\7z.exe")
-
-pytestmark = pytest.mark.skipif(
-    not SZ_EXE.exists(),
-    reason="7-Zip not found at C:\\Program Files\\7-Zip\\7z.exe",
-)
-
-
-def _sz(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(SZ_EXE), *args], capture_output=True, text=True)
+SZ_EXE = shutil.which("7z") or shutil.which("7zz")
 
 
 def _sz_test(archive: Path) -> int:
-    return _sz("t", str(archive)).returncode
+    """Return the 7-Zip test exit code; skip the calling test without 7-Zip."""
+    if SZ_EXE is None:
+        pytest.skip("7-Zip (7z or 7zz) not found in PATH")
+    return subprocess.run(
+        [SZ_EXE, "t", str(archive)], capture_output=True, text=True
+    ).returncode
 
 
 def _parse_extra_has_zip64(extra: bytes) -> bool:
@@ -150,7 +148,7 @@ class TestZip64Functional:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Low file-count limit forces ZIP64 EOCD/locator for multi-file archives."""
-        monkeypatch.setattr(file_mod, "ZIP_FILECOUNT_LIMIT", 2)
+        monkeypatch.setattr(records_mod, "ZIP_FILECOUNT_LIMIT", 2)
 
         path = tmp_path / "zip64-count.zip"
         with ZipFile(path, "w") as zf:

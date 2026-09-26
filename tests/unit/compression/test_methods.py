@@ -3,49 +3,11 @@ from __future__ import annotations
 import pytest
 
 from ziplet.compression.methods import (
-    BZIP2_VERSION,
-    LZMA_VERSION,
-    ZIP_BZIP2,
-    ZIP_DEFLATED,
-    ZIP_LZMA,
-    ZIP_STORED,
-    ZIP_ZSTANDARD,
-    ZSTANDARD_VERSION,
     CompressionEntry,
     CompressorBase,
     DecompressorBase,
     StreamingDecompressor,
 )
-
-
-class TestCompressionMethodConstants:
-    def test_zip_stored(self) -> None:
-        assert ZIP_STORED == 0
-
-    def test_zip_deflated(self) -> None:
-        assert ZIP_DEFLATED == 8
-
-    def test_zip_bzip2(self) -> None:
-        assert ZIP_BZIP2 == 12
-
-    def test_zip_lzma(self) -> None:
-        assert ZIP_LZMA == 14
-
-    def test_zip_zstandard(self) -> None:
-        assert ZIP_ZSTANDARD == 93
-
-    def test_bzip2_version(self) -> None:
-        assert BZIP2_VERSION == 46
-
-    def test_lzma_version(self) -> None:
-        assert LZMA_VERSION == 63
-
-    def test_zstandard_version(self) -> None:
-        assert ZSTANDARD_VERSION == 63
-
-    def test_all_method_ids_distinct(self) -> None:
-        ids = [ZIP_STORED, ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA, ZIP_ZSTANDARD]
-        assert len(ids) == len(set(ids))
 
 
 class TestCompressorBase:

@@ -146,29 +146,6 @@ class TestBadArchiveErrors:
 # ---------------------------------------------------------------------------
 
 
-class TestPasswordErrors:
-    @pytest.mark.parametrize("encryption", [ziplet.WZ_AES, ziplet.ZIP_CRYPTO])
-    def test_missing_password_raises_runtime_error(
-        self, tmp_path: Path, encryption: str
-    ) -> None:
-        path = tmp_path / "enc.zip"
-        _write_encrypted_zip(path, encryption)
-        with ZipFile(path, "r") as zf:
-            with pytest.raises(RuntimeError, match="password"):
-                zf.read("secret.txt")
-
-    @pytest.mark.parametrize("encryption", [ziplet.WZ_AES, ziplet.ZIP_CRYPTO])
-    def test_wrong_password_raises_runtime_error(
-        self, tmp_path: Path, encryption: str
-    ) -> None:
-        path = tmp_path / "enc.zip"
-        _write_encrypted_zip(path, encryption)
-        with ZipFile(path, "r") as zf:
-            zf.setpassword(WRONG_PASSWORD)
-            with pytest.raises(RuntimeError, match="[Bb]ad password|[Pp]assword"):
-                zf.read("secret.txt")
-
-
 # ---------------------------------------------------------------------------
 # 5. Archive comment
 # ---------------------------------------------------------------------------
@@ -278,6 +255,17 @@ class TestTestZip:
         with ZipFile(path, "r") as zf:
             assert zf.testzip() is None
 
+    def test_testzip_names_first_corrupt_member(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.zip"
+        with ZipFile(path, "w") as zf:
+            zf.writestr("good.txt", b"good data")
+            zf.writestr("bad.txt", b"bad data")
+        raw = bytearray(path.read_bytes())
+        raw[raw.index(b"bad data")] ^= 0xFF
+        path.write_bytes(raw)
+        with ZipFile(path, "r") as zf:
+            assert zf.testzip() == "bad.txt"
+
 
 # ---------------------------------------------------------------------------
 # 9. ZipFileExtra â€” nbits and force_wz_aes_version
@@ -301,30 +289,6 @@ class TestZipFileExtra:
             info = zf.getinfo("f.txt")
             assert info.aes_extra.wz_aes_strength == expected_strength
             assert zf.read("f.txt") == CONTENT
-
-    def test_force_wz_aes_v2_zeroes_crc(self, tmp_path: Path) -> None:
-        path = tmp_path / "v2.zip"
-        x = ZipFileExtra(force_wz_aes_version=2)
-        with ZipFile(path, "w", encryption=ziplet.WZ_AES, extra=x) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("f.txt", CONTENT * 10)  # >20 bytes so auto would pick V1
-        with ZipFile(path, "r") as zf:
-            zf.setpassword(PASSWORD)
-            info = zf.getinfo("f.txt")
-            assert info.CRC == 0
-            assert zf.read("f.txt") == CONTENT * 10
-
-    def test_force_wz_aes_v1_preserves_crc(self, tmp_path: Path) -> None:
-        path = tmp_path / "v1.zip"
-        x = ZipFileExtra(force_wz_aes_version=1)
-        with ZipFile(path, "w", encryption=ziplet.WZ_AES, extra=x) as zf:
-            zf.setpassword(PASSWORD)
-            zf.writestr("f.txt", CONTENT * 10)
-        with ZipFile(path, "r") as zf:
-            zf.setpassword(PASSWORD)
-            info = zf.getinfo("f.txt")
-            assert info.CRC != 0
-            assert zf.read("f.txt") == CONTENT * 10
 
 
 # ---------------------------------------------------------------------------

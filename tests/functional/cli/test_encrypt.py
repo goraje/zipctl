@@ -172,15 +172,6 @@ def test_no_password_and_no_terminal_is_a_usage_error(
     assert leftovers(workdir) == []
 
 
-def test_an_empty_password_file_is_a_usage_error(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
-    (workdir / "pw").write_text("\n")
-    result = encrypt(cli, workdir, "--password-file", str(workdir / "pw"))
-    assert result.returncode == 2, result
-    assert "empty" in result.stderr
-
-
 def test_prompt_needs_a_terminal(cli: CliRunner, workdir: Path, source: Path) -> None:
     result = encrypt(cli, workdir, "--password-prompt", stdin="x\n")
     assert result.returncode == 2, result

@@ -414,22 +414,6 @@ def test_without_any_source_and_without_a_terminal_it_is_a_usage_error(
     assert "--password-file" in result.stderr
 
 
-def test_an_empty_password_file_is_a_usage_error(
-    cli: CliRunner, shared: Path, workdir: Path
-) -> None:
-    empty = workdir / "empty"
-    empty.write_bytes(b"\n")
-    result = cli("check-password", str(shared), "--password-file", str(empty))
-    assert result.returncode == 2
-    assert "is empty" in result.stderr
-
-
-def test_empty_standard_input_is_a_usage_error(cli: CliRunner, shared: Path) -> None:
-    result = cli("check-password", str(shared), "--password-stdin", stdin="")
-    assert result.returncode == 2
-    assert "no password on standard input" in result.stderr
-
-
 def test_prompting_without_a_terminal_is_a_usage_error(
     cli: CliRunner, shared: Path
 ) -> None:

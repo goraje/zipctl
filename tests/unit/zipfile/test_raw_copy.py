@@ -56,10 +56,6 @@ def make(
     return buffer.getvalue()
 
 
-def aes_version(version: int | None) -> ziplet.ZipFileExtra | None:
-    return ziplet.ZipFileExtra(force_wz_aes_version=version) if version else None
-
-
 def flip_data_byte(archive: bytes, offset: int) -> bytes:
     """*archive* with one bit changed *offset* bytes into the only member's data."""
     with ZipFile(io.BytesIO(archive)) as zf:

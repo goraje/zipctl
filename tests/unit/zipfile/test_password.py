@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 import ziplet
+from tests.helpers import NonSeekableBytesIO
 from ziplet import (
     BadPassword,
     PasswordCheckResult,
@@ -22,14 +23,6 @@ PASSWORD = b"correct horse"
 PAYLOAD = b"secret payload " * 40
 
 
-class _NonSeekableBytesIO(io.BytesIO):
-    def seekable(self) -> bool:
-        return False
-
-    def seek(self, *args: Any, **kwargs: Any) -> int:
-        raise io.UnsupportedOperation("not seekable")
-
-
 CASES = {
     "aes128-v2": (ziplet.WZ_AES, ZipFileExtra(wz_aes_nbits=128), True),
     "aes192-v2": (ziplet.WZ_AES, ZipFileExtra(wz_aes_nbits=192), True),
@@ -42,7 +35,7 @@ CASES = {
 
 def _build(case: str, compression: int = ziplet.ZIP_STORED) -> bytes:
     encryption, extra, seekable = CASES[case]
-    buffer = io.BytesIO() if seekable else _NonSeekableBytesIO()
+    buffer = io.BytesIO() if seekable else NonSeekableBytesIO()
     with ziplet.ZipFile(
         buffer, "w", compression=compression, encryption=encryption, extra=extra
     ) as zf:

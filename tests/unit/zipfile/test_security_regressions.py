@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import random
 import stat
 import struct
 from typing import Any, cast
@@ -9,6 +10,7 @@ from typing import Any, cast
 import pytest
 
 import ziplet
+from tests.helpers import NonSeekableBytesIO
 from ziplet.compression import lzma, registry
 from ziplet.exceptions import BadZipFile, LargeZipFile
 from ziplet.zipfile.exceptions import ExtractionMaterializationError
@@ -23,11 +25,6 @@ from ziplet.zipfile.shared import (
     FILE_HEADER_SIZE,
     FILE_HEADER_STRUCT,
 )
-
-
-def test_max_n_is_31_bit_maximum() -> None:
-    assert ZipExtFile.MAX_N == (1 << 31) - 1
-    assert ZipExtFile.MAX_READ_SIZE == 1 << 20
 
 
 def test_read2_caps_forged_compressed_size_reads() -> None:
@@ -162,11 +159,19 @@ def test_truncated_compressed_member_raises(tmp_path: Any, compression: int) -> 
 
     path = tmp_path / f"truncated-{compression}.zip"
     with ziplet.ZipFile(path, "w", compression=compression) as zf:
-        zf.writestr("payload.bin", b"payload " * 1024)
-    path.write_bytes(path.read_bytes()[:-30])
+        zf.writestr("payload.bin", random.Random(0).randbytes(4096))
+    archive = bytearray(path.read_bytes())
 
-    with pytest.raises((BadZipFile, EOFError)):
-        with ziplet.ZipFile(path) as zf:
+    # Shorten the recorded compressed size in both headers so the archive stays
+    # openable and the truncation is only hit while the member is read.
+    central_offset = archive.index(CENTRAL_DIR_SIGNATURE)
+    (compress_size,) = struct.unpack_from("<L", archive, central_offset + 20)
+    struct.pack_into("<L", archive, central_offset + 20, compress_size - 30)
+    struct.pack_into("<L", archive, 18, compress_size - 30)
+    path.write_bytes(archive)
+
+    with ziplet.ZipFile(path) as zf:
+        with pytest.raises((BadZipFile, EOFError)):
             zf.read("payload.bin")
 
 
@@ -225,16 +230,8 @@ def test_aes_v1_headers_preserve_crc(tmp_path: Any) -> None:
     assert local_version == central_version == ziplet.WZ_AES_V1
 
 
-class _NonSeekableBytesIO(io.BytesIO):
-    def seekable(self) -> bool:
-        return False
-
-    def seek(self, *args: Any, **kwargs: Any) -> int:
-        raise io.UnsupportedOperation("not seekable")
-
-
 def test_aes_output_works_on_non_seekable_stream() -> None:
-    buffer = _NonSeekableBytesIO()
+    buffer = NonSeekableBytesIO()
     with ziplet.ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", b"payload")
@@ -245,7 +242,7 @@ def test_aes_output_works_on_non_seekable_stream() -> None:
 
 
 def test_aes_v2_data_descriptor_zeroes_crc() -> None:
-    buffer = _NonSeekableBytesIO()
+    buffer = NonSeekableBytesIO()
     with ziplet.ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", b"payload")

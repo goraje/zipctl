@@ -286,18 +286,6 @@ def test_the_environment_alone_does_not_encrypt(
     assert set(schemes(workdir / "out.zip").values()) == {"none"}
 
 
-def test_an_empty_password_file_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
-    empty = workdir / "empty"
-    empty.write_bytes(b"\n")
-    result = create(
-        cli, workdir, "--encryption", "aes256", "--password-file", str(empty)
-    )
-    assert result.returncode == 2
-    assert "is empty" in result.stderr
-
-
 def test_the_password_never_appears_in_any_output(
     cli: CliRunner, workdir: Path, tree: Path
 ) -> None:

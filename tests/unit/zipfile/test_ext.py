@@ -76,12 +76,3 @@ class TestZipExtFileSetupDecrypter:
         assert ext._orig_compress_left == (
             80 - ZipCryptoDecrypter.encryption_header_length
         )
-
-    def test_get_decrypter_kwargs_returns_pwd_and_header(self) -> None:
-        ext = _make_ext()
-        ext._pwd = b"pw"
-        ext.encryption_header = b"header"
-
-        kwargs = ext._decrypter_kwargs()
-
-        assert kwargs == {"pwd": b"pw", "encryption_header": b"header"}

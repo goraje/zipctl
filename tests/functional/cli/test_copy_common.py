@@ -330,6 +330,7 @@ def test_json_output_is_only_json_even_with_verbose(
     cli: CliRunner, workdir: Path, job: tuple[str, Path, list[str]]
 ) -> None:
     result = go(cli, job, workdir / "out.zip", "--json", "-v")
+    assert result.returncode == 0, result
     json.loads(result.stdout)
 
 

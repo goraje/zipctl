@@ -50,6 +50,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=6.0.0",
     "pytest-sugar>=1.1.1",
+    "pytest-xdist>=3.8.0",
     "shtab>=1.12.1",
 ]
 
@@ -84,6 +85,7 @@ lint.select = [
 "src/ziplet/cli/commands/helpers/command.py" = ["SLF001"]
 
 [tool.pytest.ini_options]
+addopts = "-n auto"
 markers = [
     "windows: tests that require a Windows runner and 7-Zip",
 ]
