@@ -11,6 +11,7 @@ from ziplet.cryptography.zipcrypto import (
     _gen_crc,
     _ZipCryptoState,
 )
+from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
 
 # ---------------------------------------------------------------------------
@@ -18,15 +19,20 @@ from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
 # ---------------------------------------------------------------------------
 
 
+def _zinfo_at(dos_time: int) -> ZipInfo:
+    """A ZipInfo whose ``get_dostime()`` is *dos_time*."""
+    zinfo = ZipInfo("test.txt")
+    hour, minute, second = dos_time >> 11, (dos_time >> 5) & 0x3F, (dos_time & 0x1F) * 2
+    zinfo.date_time = (2020, 1, 1, hour, minute, second)
+    return zinfo
+
+
 def _make_enc_header(
     pwd: bytes, dos_time: int = 0x5A3C
 ) -> tuple[ZipCryptoEncryptor, bytes]:
     """Return a fresh encryptor (after update_zipinfo) and its encryption header."""
     enc = ZipCryptoEncryptor(pwd)
-    zinfo = MagicMock()
-    zinfo.flag_bits = 0
-    zinfo.get_dostime.return_value = dos_time
-    enc.update_zipinfo(zinfo)
+    enc.update_zipinfo(_zinfo_at(dos_time))
     return enc, enc.encryption_header()
 
 
@@ -119,14 +125,13 @@ class TestZipCryptoEncryptor:
 
     def test_update_zipinfo_sets_data_descriptor_flag(self) -> None:
         enc = ZipCryptoEncryptor(b"pw")
-        zinfo = MagicMock()
-        zinfo.flag_bits = 0
+        zinfo = ZipInfo("test.txt")
         enc.update_zipinfo(zinfo)
         assert zinfo.flag_bits & MASK_USE_DATA_DESCRIPTOR
 
     def test_update_zipinfo_preserves_other_flags(self) -> None:
         enc = ZipCryptoEncryptor(b"pw")
-        zinfo = MagicMock()
+        zinfo = ZipInfo("test.txt")
         zinfo.flag_bits = 0x0001
         enc.update_zipinfo(zinfo)
         assert zinfo.flag_bits & 0x0001
@@ -212,10 +217,7 @@ class TestZipCryptoDecrypter:
     def test_round_trip_various_lengths(self, plaintext: bytes) -> None:
         dos_time = 0x1A2B
         enc = ZipCryptoEncryptor(b"multitest")
-        enc_zinfo = MagicMock()
-        enc_zinfo.flag_bits = 0
-        enc_zinfo.get_dostime.return_value = dos_time
-        enc.update_zipinfo(enc_zinfo)
+        enc.update_zipinfo(_zinfo_at(dos_time))
         header = enc.encryption_header()
         ciphertext = enc.encrypt(plaintext)
 

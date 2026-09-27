@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import pytest
+from typing_extensions import Unpack, override
 
 from tests.functional.cli.rewrite_support import (
     PASSWORD,
@@ -21,9 +22,23 @@ from tests.functional.cli.rewrite_support import (
 )
 from ziplet import ZipFile
 from ziplet.cli import main
+from ziplet.zipfile.file import EncryptionOverride, ZipFileExtra
+from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.write import ZipWriteFile
 
+if TYPE_CHECKING:
+    from _typeshed import ReadableBuffer
+
 Run = Callable[..., tuple[int, str, str]]
+
+
+class OpenToWriteOptions(TypedDict, total=False):
+    """The keyword-only parameters of ``ZipFile._open_to_write``."""
+
+    encryption: EncryptionOverride
+    password: bytes | None
+    extra: ZipFileExtra | None
+    raw: bool
 
 
 @pytest.fixture
@@ -52,8 +67,9 @@ RECOMPRESS = ("rewrite", "--compression", "deflate")
 def drop_last_byte(monkeypatch: pytest.MonkeyPatch) -> None:
     original = ZipWriteFile.write
 
-    def write(self: ZipWriteFile, data: Any) -> int:
-        return original(self, bytes(data)[:-1] if len(data) > 1 else data)
+    def write(self: ZipWriteFile, data: ReadableBuffer, /) -> int:
+        raw = bytes(data)
+        return original(self, raw[:-1] if len(raw) > 1 else raw)
 
     monkeypatch.setattr(ZipWriteFile, "write", write)
 
@@ -61,7 +77,7 @@ def drop_last_byte(monkeypatch: pytest.MonkeyPatch) -> None:
 def flip_last_byte(monkeypatch: pytest.MonkeyPatch) -> None:
     original = ZipWriteFile.write
 
-    def write(self: ZipWriteFile, data: Any) -> int:
+    def write(self: ZipWriteFile, data: ReadableBuffer, /) -> int:
         raw = bytes(data)
         return original(self, raw[:-1] + bytes([raw[-1] ^ 1]) if raw else raw)
 
@@ -83,7 +99,7 @@ def test_data_of_a_different_length_is_caught_even_if_the_checksum_agrees(
 ) -> None:
     class NoChecksum:
         @staticmethod
-        def crc32(data: bytes, value: int = 0) -> int:
+        def crc32(_data: bytes, _value: int = 0) -> int:
             return 0
 
     monkeypatch.setattr("ziplet.cli.commands.helpers.copying.copy.zlib", NoChecksum)
@@ -115,9 +131,14 @@ def test_compression_option_bits_that_are_not_carried_over_are_caught(
 ) -> None:
     original = ZipFile._open_to_write
 
-    def wrong_bits(self: ZipFile, zinfo: Any, *a: Any, **kw: Any) -> Any:
+    def wrong_bits(
+        self: ZipFile,
+        zinfo: ZipInfo,
+        force_zip64: bool = False,
+        **kw: Unpack[OpenToWriteOptions],
+    ) -> ZipWriteFile:
         zinfo.flag_bits ^= 0b010
-        return original(self, zinfo, *a, **kw)
+        return original(self, zinfo, force_zip64, **kw)
 
     monkeypatch.setattr(ZipFile, "_open_to_write", wrong_bits)
     out = workdir / "out.zip"
@@ -187,9 +208,15 @@ def test_a_member_written_with_the_wrong_protection_is_caught(
 ) -> None:
     original = ZipFile._open_to_write
 
-    def open_plain(self: ZipFile, zinfo: Any, *a: Any, **kw: Any) -> Any:
-        kw.update(encryption=None, password=None)
-        return original(self, zinfo, *a, **kw)
+    def open_plain(
+        self: ZipFile,
+        zinfo: ZipInfo,
+        force_zip64: bool = False,
+        **kw: Unpack[OpenToWriteOptions],
+    ) -> ZipWriteFile:
+        kw["encryption"] = None
+        kw["password"] = None
+        return original(self, zinfo, force_zip64, **kw)
 
     monkeypatch.setattr(ZipFile, "_open_to_write", open_plain)
     out = workdir / "out.zip"
@@ -202,7 +229,13 @@ def test_a_member_written_with_the_wrong_protection_is_caught(
 def test_a_member_that_is_missing_from_the_output_is_caught(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(ZipFile, "mkdir", lambda self, *a, **kw: None)
+
+    def skip_mkdir(
+        _self: ZipFile, _zinfo_or_directory_name: str | ZipInfo, _mode: int = 511
+    ) -> None:
+        pass
+
+    monkeypatch.setattr(ZipFile, "mkdir", skip_mkdir)
     out = workdir / "out.zip"
     code, _, stderr = run("encrypt", str(source), str(out))
     assert code == 1
@@ -215,9 +248,9 @@ def test_lost_metadata_is_caught(
 ) -> None:
     original = ZipFile.mkdir
 
-    def forgetful(self: ZipFile, info: Any, *a: Any, **kw: Any) -> None:
+    def forgetful(self: ZipFile, info: ZipInfo, mode: int = 511) -> None:
         info.comment = b""
-        original(self, info, *a, **kw)
+        original(self, info, mode)
 
     monkeypatch.setattr(ZipFile, "mkdir", forgetful)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
@@ -230,9 +263,9 @@ def test_lost_extra_fields_are_caught(
 ) -> None:
     original = ZipFile.mkdir
 
-    def forgetful(self: ZipFile, info: Any, *a: Any, **kw: Any) -> None:
+    def forgetful(self: ZipFile, info: ZipInfo, mode: int = 511) -> None:
         info.extra = b""
-        original(self, info, *a, **kw)
+        original(self, info, mode)
 
     monkeypatch.setattr(ZipFile, "mkdir", forgetful)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
@@ -245,11 +278,13 @@ def test_a_lost_archive_comment_is_caught(
 ) -> None:
     class Forgetful(ZipFile):
         @property
+        @override
         def comment(self) -> bytes:
             return super().comment
 
         @comment.setter
-        def comment(self, value: bytes) -> None:
+        @override
+        def comment(self, comment: bytes) -> None:
             pass
 
     monkeypatch.setattr("ziplet.cli.commands.helpers.copying.copy.ZipFile", Forgetful)
@@ -265,10 +300,10 @@ def test_an_unreadable_output_is_reported(
 
     real = ZipFile
 
-    def flaky(path: Any, mode: Any = "r", *a: Any, **kw: Any) -> Any:
+    def flaky(path: Path, mode: Literal["r", "w", "x", "a"] = "r") -> ZipFile:
         if mode == "r":
             raise BadZipFile("File is not a zip file")
-        return real(path, mode, *a, **kw)
+        return real(path, mode)
 
     monkeypatch.setattr("ziplet.cli.commands.helpers.copying.verify.ZipFile", flaky)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
@@ -289,7 +324,7 @@ def test_a_healthy_run_reads_the_output_back_and_says_so(
 def test_a_write_failure_midway_leaves_nothing(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def full_disk(self: ZipWriteFile, data: Any) -> int:
+    def full_disk(_self: ZipWriteFile, _data: ReadableBuffer, /) -> int:
         raise OSError(28, "No space left on device")
 
     monkeypatch.setattr(ZipWriteFile, "write", full_disk)
@@ -311,7 +346,7 @@ def test_a_compression_method_this_install_lacks_is_refused_up_front(
 ) -> None:
     from ziplet.compression import registry
 
-    def missing(method: int) -> None:
+    def missing(_method: int) -> None:
         raise RuntimeError("not installed")
 
     monkeypatch.setattr(registry, "check_compression", missing)

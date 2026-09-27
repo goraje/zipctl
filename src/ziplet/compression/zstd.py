@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any, cast
+from typing import Protocol, cast
+
+from typing_extensions import override
 
 from ziplet.compression.methods import (
     ZIP_ZSTANDARD,
@@ -11,7 +13,31 @@ from ziplet.compression.methods import (
 )
 
 
-def _load_zstd() -> Any:
+class _ZstdCompressorLike(Protocol):
+    def compress(self, data: bytes) -> bytes: ...
+
+    def flush(self) -> bytes: ...
+
+
+class _ZstdDecompressorLike(Protocol):
+    @property
+    def eof(self) -> bool: ...
+
+    @property
+    def needs_input(self) -> bool: ...
+
+    def decompress(self, data: bytes, max_length: int = -1) -> bytes: ...
+
+
+class _ZstdModule(Protocol):
+    """The part of ``compression.zstd`` used here."""
+
+    def ZstdCompressor(self, *, level: int | None = None) -> _ZstdCompressorLike: ...
+
+    def ZstdDecompressor(self) -> _ZstdDecompressorLike: ...
+
+
+def _load_zstd() -> _ZstdModule | None:
     """Return the stdlib ``compression.zstd`` (3.14+), else ``backports.zstd``.
 
     Loaded dynamically so type checking behaves the same on every Python
@@ -19,7 +45,8 @@ def _load_zstd() -> Any:
     """
     for name in ("compression.zstd", "backports.zstd"):
         try:
-            return import_module(name)
+            # The import is dynamic, so the module is only known by its use here
+            return cast("_ZstdModule", cast("object", import_module(name)))
         except ImportError:
             continue
     return None
@@ -30,6 +57,7 @@ zstd = _load_zstd()
 compression_entry: CompressionEntry | None = None
 
 if zstd is not None:
+    _module: _ZstdModule = zstd
 
     class _ZstdCompressor(CompressorBase):
         """Wraps zstd.ZstdCompressor to satisfy CompressorBase.
@@ -45,8 +73,9 @@ if zstd is not None:
                 level: The Zstandard compression level. If None, the default
                     compression level is used.
             """
-            self._c = zstd.ZstdCompressor(level=level)
+            self._c: _ZstdCompressorLike = _module.ZstdCompressor(level=level)
 
+        @override
         def compress(self, data: bytes) -> bytes:
             """Compresses a chunk of data.
 
@@ -56,15 +85,16 @@ if zstd is not None:
             Returns:
                 Compressed bytes. May be empty if data is buffered internally.
             """
-            return cast(bytes, self._c.compress(data))
+            return self._c.compress(data)
 
+        @override
         def flush(self) -> bytes:
             """Flushes any remaining buffered data and finalizes the stream.
 
             Returns:
                 The remaining compressed bytes.
             """
-            return cast(bytes, self._c.flush())
+            return self._c.flush()
 
     class _ZstdDecompressor(DecompressorBase):
         """Wraps zstd.ZstdDecompressor to satisfy DecompressorBase.
@@ -75,9 +105,10 @@ if zstd is not None:
 
         def __init__(self) -> None:
             """Initializes the decompressor."""
-            self._d = zstd.ZstdDecompressor()
+            self._d: _ZstdDecompressorLike = _module.ZstdDecompressor()
 
         @property
+        @override
         def eof(self) -> bool:
             """Whether the end of the compressed stream has been reached.
 
@@ -85,12 +116,13 @@ if zstd is not None:
                 True if the decompressor has reached the end of stream,
                 False otherwise.
             """
-            return cast(bool, self._d.eof)
+            return self._d.eof
 
         @property
         def needs_input(self) -> bool:
-            return cast(bool, self._d.needs_input)
+            return self._d.needs_input
 
+        @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
             """Decompresses a chunk of data.
 
@@ -100,7 +132,7 @@ if zstd is not None:
             Returns:
                 Decompressed bytes.
             """
-            return cast(bytes, self._d.decompress(data, max_length))
+            return self._d.decompress(data, max_length)
 
     compression_entry = CompressionEntry(
         compression_method=ZIP_ZSTANDARD,

@@ -8,6 +8,7 @@ import sys
 import traceback
 from collections.abc import Sequence
 
+from ziplet.cli.commands.helpers.command import Handler
 from ziplet.cli.context import Context
 from ziplet.cli.errors import (
     EXIT_BROKEN_PIPE,
@@ -15,12 +16,19 @@ from ziplet.cli.errors import (
     EXIT_INTERRUPTED,
     EXIT_OK,
     CliError,
+    os_error_filename,
     os_error_text,
 )
 from ziplet.cli.output import printable, write_json
 from ziplet.cli.parser import build_parser
 
 __all__ = ["main"]
+
+
+class _Parsed(argparse.Namespace):
+    """The parsed arguments, with the handler the chosen command registered."""
+
+    handler: Handler  # pyright: ignore[reportUninitializedInstanceVariable]  # set by argparse
 
 
 def _exit_code(code: object) -> int:
@@ -53,7 +61,8 @@ def _fail(
     ctx.err(f"ziplet: error: {message}")
     for line in details:
         ctx.err(f"  {line}")
-    if getattr(args, "json", False):
+    wants_json: bool = getattr(args, "json", False)  # not every command has --json
+    if wants_json:
         error = {"ok": False, "error": message, "code": code, "details": list(details)}
         write_json(ctx.stdout, error)
     return code
@@ -69,7 +78,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     try:
-        args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+        args = parser.parse_args(
+            sys.argv[1:] if argv is None else argv, namespace=_Parsed()
+        )
     except SystemExit as exc:
         return _exit_code(exc.code)
 
@@ -86,7 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _quiet_broken_pipe()
         return EXIT_BROKEN_PIPE
     except OSError as exc:  # whatever a command did not translate itself
-        where = f"{printable(str(exc.filename))}: " if exc.filename else ""
+        filename = os_error_filename(exc)
+        where = f"{printable(filename)}: " if filename else ""
         message = f"{where}{printable(os_error_text(exc))}"
         return _fail(ctx, args, exc, message, EXIT_FAILURE)
     except Exception as exc:  # a bug: name it, and offer the traceback

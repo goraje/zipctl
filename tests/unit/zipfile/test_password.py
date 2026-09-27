@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import os
 import struct
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -68,12 +68,16 @@ def _deterministic_salts(monkeypatch: pytest.MonkeyPatch) -> None:
     A wrong password legitimately passes the header check now and then (1 in
     256 for ZipCrypto), so random headers would make the rejection tests flaky.
     """
-    monkeypatch.setattr(os, "urandom", lambda size: bytes(range(size)))
+
+    def urandom(size: int) -> bytes:
+        return bytes(range(size))
+
+    monkeypatch.setattr(os, "urandom", urandom)
 
 
 @pytest.fixture(params=list(CASES))
 def case(request: pytest.FixtureRequest) -> str:
-    return str(request.param)
+    return cast("str", request.param)
 
 
 def test_correct_password_is_accepted(case: str) -> None:
@@ -133,7 +137,7 @@ def test_password_argument_errors() -> None:
         with pytest.raises(ValueError, match="non-empty password"):
             zf.check_password(b"")
         with pytest.raises(TypeError, match="expected bytes"):
-            zf.check_password(cast(Any, "text"))
+            zf.check_password("text")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
         with pytest.raises(KeyError):
             zf.check_password(PASSWORD, members=["missing.txt"])
     with pytest.raises(ValueError, match="closed"):
@@ -143,7 +147,7 @@ def test_password_argument_errors() -> None:
 def test_header_check_never_reads_the_payload(
     case: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def forbidden(*args: object, **kwargs: object) -> bytes:
+    def forbidden(*_args: object, **_kwargs: object) -> bytes:
         raise AssertionError("payload was read")
 
     monkeypatch.setattr(ZipExtFile, "_read1", forbidden)
@@ -176,7 +180,7 @@ def test_aes_full_check_authenticates_without_decompressing(
 ) -> None:
     data = _build("aes256-v2", compression=ziplet.ZIP_DEFLATED)
 
-    def forbidden(*args: object, **kwargs: object) -> bytes:
+    def forbidden(*_args: object, **_kwargs: object) -> bytes:
         raise AssertionError("payload was decompressed")
 
     monkeypatch.setattr(ZipExtFile, "_read1", forbidden)

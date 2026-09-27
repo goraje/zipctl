@@ -37,3 +37,9 @@ repos:
         entry: uv run --group dev --with ty ty check
         language: unsupported
         types_or: [python, pyi]
+      - id: basedpyright
+        name: basedpyright
+        entry: uv run --group dev --with basedpyright basedpyright
+        language: unsupported
+        types_or: [python, pyi]
+        pass_filenames: false

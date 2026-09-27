@@ -2,29 +2,32 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
 from ziplet.cli.commands.helpers.copying.copy import read_passwords, run_copy
 from ziplet.cli.commands.helpers.copying.options import (
+    CopyArgs,
     add_copy_options,
     check_paths,
     copy_job,
 )
 from ziplet.cli.commands.helpers.copying.targets import (
     PLAIN,
+    Target,
     keep_target,
     target_for_method,
 )
 from ziplet.cli.commands.helpers.encryption.options import (
+    EncryptionArgs,
     EncryptionOptions,
     add_encryption_options,
     build_plan,
 )
 from ziplet.cli.commands.helpers.encryption.plan import warn_if_weak
 from ziplet.cli.commands.helpers.passwords.options import (
+    OldPasswordArgs,
     add_old_password_options,
     add_password_options,
     old_password_pool,
@@ -34,7 +37,12 @@ from ziplet.cli.errors import UsageError
 from ziplet.cli.methods import COMPRESSION, require_compression, require_level
 
 
-def cmd_rewrite(args: argparse.Namespace, ctx: Context) -> int:
+class RewriteArgs(CopyArgs, EncryptionArgs, OldPasswordArgs, Protocol):
+    compression: str | None
+    level: int | None
+
+
+def cmd_rewrite(args: RewriteArgs, ctx: Context) -> int:
     job = copy_job(args)
     check_paths(job)
     if args.compression is not None:
@@ -52,7 +60,7 @@ def cmd_rewrite(args: argparse.Namespace, ctx: Context) -> int:
         old_pool = old_password_pool(args, ctx)
         passwords = read_passwords(src, infos, old_pool)
         plan.resolve_prompts(assignment, ctx)
-        targets = []
+        targets: list[Target] = []
         for info, password in zip(infos, passwords, strict=True):
             if info.is_dir():
                 targets.append(PLAIN)
@@ -78,7 +86,7 @@ def cmd_rewrite(args: argparse.Namespace, ctx: Context) -> int:
         )
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "rewrite",

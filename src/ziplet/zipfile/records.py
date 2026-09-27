@@ -4,6 +4,9 @@ Everything that knows the on-disk layout of the archive-level records lives
 here, so :class:`~ziplet.zipfile.file.ZipFile` only deals with typed values.
 """
 
+# Friend access inside the zipfile package (ruff exempts it via SLF001).
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import io
@@ -370,7 +373,7 @@ def read_directory(
         consumed += declared_length
 
     end_offset = start_dir
-    for info in reversed(sorted(infos, key=lambda info: info.header_offset)):
+    for info in sorted(infos, key=lambda info: info.header_offset, reverse=True):
         info._end_offset = end_offset
         end_offset = info.header_offset
     return ArchiveDirectory(record.comment, start_dir, infos)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import struct
 
+from typing_extensions import override
+
 from ziplet.compression.methods import (
     ZIP_LZMA,
     CompressionEntry,
@@ -108,6 +110,7 @@ try:
             self._comp = comp
             return struct.pack("<BBH", 9, 4, len(props)) + props, comp
 
+        @override
         def compress(self, data: bytes) -> bytes:
             """Compresses a chunk of data.
 
@@ -126,6 +129,7 @@ try:
                 return header + comp.compress(data)
             return self._comp.compress(data)
 
+        @override
         def flush(self) -> bytes:
             """Flushes any remaining buffered data and finalizes the stream.
 
@@ -164,6 +168,7 @@ try:
             self._eof: bool = False
 
         @property
+        @override
         def eof(self) -> bool:
             """Whether the end of the compressed stream has been reached.
 
@@ -177,6 +182,7 @@ try:
         def needs_input(self) -> bool:
             return self._decomp is None or self._decomp.needs_input
 
+        @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
             """Decompresses a chunk of data.
 

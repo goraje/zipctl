@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from typing_extensions import Unpack
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
@@ -19,7 +20,7 @@ from tests.functional.cli.rewrite_support import (
     schemes,
     snapshot,
 )
-from tests.functional.cli.support import HAS_PTY, write_archive
+from tests.functional.cli.support import HAS_PTY, Result, RunOptions, write_archive
 from tests.functional.cli.support import run_in_terminal as terminal
 from ziplet import ZipFile
 
@@ -44,7 +45,9 @@ def encrypted_source(
     )
 
 
-def decrypt(cli: CliRunner, workdir: Path, *args: str, **kw: object):  # type: ignore[no-untyped-def]
+def decrypt(
+    cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]
+) -> Result:
     return cli(
         "decrypt", str(workdir / "in.zip"), str(workdir / "out.zip"), *args, **kw
     )

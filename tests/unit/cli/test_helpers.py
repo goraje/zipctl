@@ -7,11 +7,13 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import PurePosixPath
+from typing import cast
 
 import pytest
 
 from tests.unit.cli.conftest import new_context
 from ziplet.cli.commands.helpers.output_options import (
+    OutputArgs,
     OutputOptions,
     add_output_options,
 )
@@ -143,6 +145,10 @@ def test_standard_input_reads_the_same_with_or_without_a_binary_buffer(
     assert binary.read_stdin(line=line) == expected
 
 
+def _output_args(args: argparse.Namespace) -> OutputArgs:
+    return cast("OutputArgs", args)  # pyright: ignore[reportInvalidCast]  # Namespace has the attributes the Protocol names
+
+
 def test_a_warning_carries_the_program_prefix() -> None:
     err = io.StringIO()
     Context(io.StringIO(), io.StringIO(), err, {}).warn("careful")
@@ -152,10 +158,10 @@ def test_a_warning_carries_the_program_prefix() -> None:
 def test_output_options_read_false_for_the_flags_a_command_lacks() -> None:
     parser = argparse.ArgumentParser()
     add_output_options(parser)  # only --json
-    assert OutputOptions.from_args(parser.parse_args(["--json"])) == OutputOptions(
-        json=True
-    )
+    assert OutputOptions.from_args(
+        _output_args(parser.parse_args(["--json"]))
+    ) == OutputOptions(json=True)
     parser = argparse.ArgumentParser()
     add_output_options(parser, verbose_help="more", quiet=True)
     parsed = parser.parse_args(["-v"])
-    assert OutputOptions.from_args(parsed) == OutputOptions(verbose=True)
+    assert OutputOptions.from_args(_output_args(parsed)) == OutputOptions(verbose=True)

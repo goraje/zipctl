@@ -2,27 +2,34 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import warnings
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
 from ziplet.cli.commands.helpers.extract_report import report_extraction, report_plain
 from ziplet.cli.commands.helpers.output_options import (
+    OutputArgs,
     OutputOptions,
     add_output_options,
 )
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     add_password_options,
     password_pool,
 )
 from ziplet.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
-from ziplet.cli.commands.helpers.policy_options import add_policy_options, load_policy
+from ziplet.cli.commands.helpers.policy_options import (
+    PolicyArgs,
+    add_policy_options,
+    load_policy,
+)
 from ziplet.cli.commands.helpers.progress import (
+    ProgressArgs,
     ProgressRenderer,
     add_progress_option,
     progress_renderer,
@@ -49,7 +56,18 @@ from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
 
 
-def _extraction_policy(args: argparse.Namespace, ctx: Context) -> ExtractPolicy:
+class ExtractArgs(OutputArgs, PasswordArgs, PolicyArgs, ProgressArgs, Protocol):
+    archive: str
+    members: list[str]
+    match: list[str]
+    destination: str | None
+    no_policy: bool
+    dry_run: bool
+    overwrite: str | None
+    no_fsync: bool
+
+
+def _extraction_policy(args: ExtractArgs, ctx: Context) -> ExtractPolicy:
     policy = load_policy(args, ctx)
     if args.overwrite is not None:
         policy = replace(policy, overwrite_policy=OverwritePolicy(args.overwrite))
@@ -60,7 +78,7 @@ def _extraction_policy(args: argparse.Namespace, ctx: Context) -> ExtractPolicy:
     return policy
 
 
-def _reject_conflicting_options(args: argparse.Namespace) -> None:
+def _reject_conflicting_options(args: ExtractArgs) -> None:
     if not args.no_policy:
         return
     used = [
@@ -83,7 +101,7 @@ def _reject_conflicting_options(args: argparse.Namespace) -> None:
 
 def _password_provider(
     pool: PasswordPool, zf: ZipFile, renderer: ProgressRenderer | None
-) -> Any:
+) -> Callable[[ZipInfo], bytes | None]:
     """A ``pwd=`` callable that finds (or asks for) each member's password."""
 
     def provide(info: ZipInfo) -> bytes | None:
@@ -145,7 +163,7 @@ def _run_extraction(
         except OSError as exc:
             raise CliError(f"cannot extract: {printable(os_error_text(exc))}") from None
     # A policy violation is reported with the result; anything else is news.
-    reported = {v.message for v in result.violations} if result else set()
+    reported: set[str] = {v.message for v in result.violations} if result else set()
     for warning in caught:
         text = str(warning.message)
         if text not in reported and not quiet:
@@ -153,7 +171,7 @@ def _run_extraction(
     return result
 
 
-def cmd_extract(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_extract(args: ExtractArgs, ctx: Context) -> int:
     _reject_conflicting_options(args)
     output = OutputOptions.from_args(args)
     policy = None if args.no_policy else _extraction_policy(args, ctx)
@@ -186,7 +204,7 @@ def cmd_extract(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_FAILURE if result.failed_count > 0 else EXIT_OK
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "extract",

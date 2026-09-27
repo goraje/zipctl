@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
-from typing import Any, NoReturn
+from collections.abc import Iterable, Sequence
+from typing import NoReturn, TypeVar, overload
+
+from typing_extensions import override
 
 from ziplet.cli.commands import (
     check_password,
@@ -25,29 +27,53 @@ from ziplet.cli.formatter import HelpFormatter
 
 __all__ = ["build_parser"]
 
-_COMMANDS = (
-    list_command,
-    test,
-    inspect,
-    create,
-    extract,
-    check_password,
-    encrypt,
-    decrypt,
-    rewrite,
-    policy,
+_N = TypeVar("_N")
+
+# the order ``--help`` shows the commands in
+_REGISTER = (
+    list_command.register,
+    test.register,
+    inspect.register,
+    create.register,
+    extract.register,
+    check_password.register,
+    encrypt.register,
+    decrypt.register,
+    rewrite.register,
+    policy.register,
 )
 
 
 class _Parser(argparse.ArgumentParser):
     """Show the help, not an error, when a command that needs arguments gets none."""
 
-    _bare = False
+    _bare: bool = False
 
-    def parse_known_args(self, args: Any = None, namespace: Any = None) -> Any:
-        self._bare = args is not None and not args
+    @overload
+    def parse_known_args(
+        self, args: Iterable[str] | None = None, namespace: None = None
+    ) -> tuple[argparse.Namespace, list[str]]: ...
+
+    @overload
+    def parse_known_args(
+        self, args: Iterable[str] | None, namespace: _N
+    ) -> tuple[_N, list[str]]: ...
+
+    @overload
+    def parse_known_args(self, *, namespace: _N) -> tuple[_N, list[str]]: ...
+
+    @override
+    def parse_known_args(
+        self,
+        args: Iterable[str] | None = None,
+        namespace: _N | None = None,
+    ) -> tuple[_N | argparse.Namespace, list[str]]:
+        self._bare = isinstance(args, Sequence) and not args
+        if namespace is None:
+            return super().parse_known_args(args)
         return super().parse_known_args(args, namespace)
 
+    @override
     def error(self, message: str) -> NoReturn:
         if self._bare:
             self.print_help(sys.stderr)
@@ -58,14 +84,20 @@ class _Parser(argparse.ArgumentParser):
 class _VersionAction(argparse.Action):
     """``--version``, looking the version up only when it is asked for."""
 
-    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any):
-        super().__init__(option_strings, dest, nargs=0, **kwargs)
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: str,
+        help: str | None = None,  # noqa: A002  # mirrors argparse.Action
+    ) -> None:
+        super().__init__(option_strings, dest, nargs=0, help=help)
 
+    @override
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: Any,
+        values: str | Sequence[str] | None,
         option_string: str | None = None,
     ) -> None:
         from importlib.metadata import PackageNotFoundError, version
@@ -81,14 +113,20 @@ class _VersionAction(argparse.Action):
 class _ExitCodesAction(argparse.Action):
     """``--exit-codes``: print the table of exit codes and stop."""
 
-    def __init__(self, option_strings: Sequence[str], dest: str, **kwargs: Any):
-        super().__init__(option_strings, dest, nargs=0, **kwargs)
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: str,
+        help: str | None = None,  # noqa: A002  # mirrors argparse.Action
+    ) -> None:
+        super().__init__(option_strings, dest, nargs=0, help=help)
 
+    @override
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: Any,
+        values: str | Sequence[str] | None,
         option_string: str | None = None,
     ) -> None:
         print(exit_codes_table())
@@ -110,11 +148,12 @@ def _expose_commands(parser: argparse.ArgumentParser) -> None:
 class _PrintCompletionsAction(argparse.Action):
     """``--print-completions SHELL``: print the completion script and stop."""
 
+    @override
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: Any,
+        values: str | Sequence[str] | None,
         option_string: str | None = None,
     ) -> None:
         try:
@@ -125,6 +164,7 @@ class _PrintCompletionsAction(argparse.Action):
                 "ziplet: error: shell completion needs the 'completion' extra "
                 "(pip install 'ziplet[completion]')\n",
             )
+        assert isinstance(values, str)
         _expose_commands(parser)
         print(shtab.complete(parser, values))
         parser.exit()
@@ -152,6 +192,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = add_subcommands(parser, "command")
 
-    for module in _COMMANDS:  # the order ``--help`` shows them in
-        module.register(subparsers)
+    for register in _REGISTER:
+        register(subparsers)
     return parser

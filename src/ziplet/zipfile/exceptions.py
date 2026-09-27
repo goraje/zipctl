@@ -22,6 +22,6 @@ class ExtractionQuotaExceeded(ExtractionFailure):
     """Raised after a member exceeds a configured extraction quota."""
 
     def __init__(self, code: str, limit: int) -> None:
-        self.code = code
-        self.limit = limit
+        self.code: str = code
+        self.limit: int = limit
         super().__init__(f"{code} limit exceeded: {limit}")

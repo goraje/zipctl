@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 from ziplet.cli.commands.helpers.passwords.pool import PasswordPool, build_password_pool
 from ziplet.cli.commands.helpers.passwords.sources import (
@@ -18,6 +19,21 @@ from ziplet.cli.context import Context
 from ziplet.cli.errors import UsageError
 
 
+class PasswordArgs(Protocol):
+    """What :func:`add_password_options` leaves on the parsed arguments."""
+
+    password_file: str | None
+    password_stdin: bool
+    password_prompt: bool
+
+
+class OldPasswordArgs(Protocol):
+    """What :func:`add_old_password_options` leaves on the parsed arguments."""
+
+    old_password_file: str | None
+    old_password_stdin: bool
+
+
 @dataclass(frozen=True)
 class PasswordOptions:
     """The options of :func:`add_password_options`."""
@@ -27,7 +43,7 @@ class PasswordOptions:
     prompt: bool
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> PasswordOptions:
+    def from_args(cls, args: PasswordArgs) -> PasswordOptions:
         return cls(args.password_file, args.password_stdin, args.password_prompt)
 
 
@@ -64,7 +80,7 @@ def add_old_password_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def old_password_pool(args: argparse.Namespace, ctx: Context) -> PasswordPool:
+def old_password_pool(args: OldPasswordArgs, ctx: Context) -> PasswordPool:
     """A pool for the input side of a rewrite (see :func:`add_old_password_options`)."""
     return build_password_pool(
         ctx,

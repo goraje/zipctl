@@ -3,28 +3,40 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from difflib import get_close_matches
-from typing import Any
+from typing import TYPE_CHECKING, TypeVar, cast
+
+from typing_extensions import override
 
 from ziplet.cli.context import Context
 from ziplet.cli.formatter import HelpFormatter
 
-__all__ = ["CommandsAction", "Handler", "add_command", "add_subcommands"]
+__all__ = ["CommandsAction", "Handler", "Subparsers", "add_command", "add_subcommands"]
+
+_Args = TypeVar("_Args")
 
 Handler = Callable[[argparse.Namespace, Context], int]
 
+# argparse's subparsers action is generic only for type checkers
+if TYPE_CHECKING:
+    Subparsers = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
+else:
+    Subparsers = argparse._SubParsersAction
+
 
 def add_command(
-    subparsers: Any,
+    subparsers: Subparsers,
     name: str,
-    handler: Handler | None,
+    handler: Callable[[_Args, Context], int] | None,
     help_text: str,
     description: str | None = None,
 ) -> argparse.ArgumentParser:
     """Add subcommand *name* running *handler* to *subparsers*.
 
     *handler* is ``None`` for a command that only groups further subcommands.
+    Its *_Args* is the shape of the options the command adds: the namespace
+    argparse builds is cast to it, the one place that trusts the parser.
     """
     parser: argparse.ArgumentParser = subparsers.add_parser(
         name,
@@ -34,26 +46,44 @@ def add_command(
         formatter_class=HelpFormatter,
     )
     if handler is not None:
-        parser.set_defaults(handler=handler)
+
+        def run(args: argparse.Namespace, ctx: Context) -> int:
+            return handler(cast("_Args", args), ctx)
+
+        parser.set_defaults(handler=run)
     return parser
 
 
-class CommandsAction(argparse._SubParsersAction):  # type: ignore[type-arg]
+class CommandsAction(Subparsers):
     """The command choice, suggesting the nearest command for a mistyped one."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        prog: str,
+        parser_class: type[argparse.ArgumentParser],
+        dest: str = argparse.SUPPRESS,
+        required: bool = False,
+        help: str | None = None,  # noqa: A002  # mirrors argparse.Action
+        metavar: str | tuple[str, ...] | None = None,
+    ) -> None:
+        super().__init__(
+            option_strings, prog, parser_class, dest, required, help, metavar
+        )
         # argparse would reject an unknown name before __call__ gets to suggest one
-        self.choices = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        self.choices = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]  # pyright: ignore[reportAttributeAccessIssue, reportUnannotatedClassAttribute]
 
+    @override
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: Any,
+        values: str | Sequence[str] | None,
         option_string: str | None = None,
     ) -> None:
-        name = values[0]
+        assert values is not None
+        assert not isinstance(values, str)
+        name = str(values[0])
         if name not in self._name_parser_map:
             lines = [f"unknown command {name!r}"]
             for close in get_close_matches(name, self._name_parser_map, n=1):
@@ -62,7 +92,11 @@ class CommandsAction(argparse._SubParsersAction):  # type: ignore[type-arg]
             parser.error("\n".join(lines))
         super().__call__(parser, namespace, values, option_string)
         # argparse reports these at the top; the command's own usage is more useful
-        extras = getattr(namespace, argparse._UNRECOGNIZED_ARGS_ATTR, None)
+        extras: list[str] | None = getattr(
+            namespace,
+            argparse._UNRECOGNIZED_ARGS_ATTR,  # pyright: ignore[reportPrivateUsage]
+            None,
+        )
         if extras:
             sub = self._name_parser_map[name]
             sub.error(
@@ -71,7 +105,7 @@ class CommandsAction(argparse._SubParsersAction):  # type: ignore[type-arg]
             )
 
 
-def add_subcommands(parser: argparse.ArgumentParser, dest: str) -> Any:
+def add_subcommands(parser: argparse.ArgumentParser, dest: str) -> Subparsers:
     """Give *parser* a ``Commands`` section listing the subcommands added to it."""
     subparsers = parser.add_subparsers(
         action=CommandsAction,

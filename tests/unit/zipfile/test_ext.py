@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -10,12 +10,20 @@ from ziplet.cryptography.zipcrypto import ZipCryptoDecrypter
 from ziplet.exceptions import PasswordRequired
 from ziplet.zipfile.ext import ZipExtFile
 from ziplet.zipfile.info import WzAesExtra, ZipInfo
+from ziplet.zipfile.io_wrappers import ClosableZipStream
+
+
+def _stream(data: bytes = b"") -> ClosableZipStream:
+    return cast(
+        "ClosableZipStream",
+        io.BytesIO(data),  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
+    )
 
 
 def _make_ext() -> ZipExtFile:
     ext = ZipExtFile.__new__(ZipExtFile)
     ext._close_fileobj = False
-    ext._fileobj = cast(Any, io.BytesIO())
+    ext._fileobj = _stream()
     return ext
 
 
@@ -49,7 +57,7 @@ class TestZipExtFileSetupDecrypter:
         ext._zinfo = zinfo
         ext._pwd = b"pw"
         ext.name = "secret.txt"
-        ext._fileobj = cast(Any, io.BytesIO(b"x" * 128))
+        ext._fileobj = _stream(b"x" * 128)
         ext._orig_compress_left = 100
 
         cls = ext._setup_decrypter()
@@ -66,7 +74,7 @@ class TestZipExtFileSetupDecrypter:
         ext._zinfo = zinfo
         ext._pwd = b"pw"
         ext.name = "secret.txt"
-        ext._fileobj = cast(Any, io.BytesIO(b"x" * 64))
+        ext._fileobj = _stream(b"x" * 64)
         ext._orig_compress_left = 80
 
         cls = ext._setup_decrypter()

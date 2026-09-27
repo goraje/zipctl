@@ -30,13 +30,8 @@ def _reasons(member: ExtractMemberResult) -> str:
     return "; ".join(printable(message) for message in messages)
 
 
-def _render_text(
-    ctx: Context,
-    destination: str,
-    result: ExtractResult,
-    output: OutputOptions,
-) -> None:
-    quiet = output.quiet
+def _render_violations(ctx: Context, result: ExtractResult, *, quiet: bool) -> bool:
+    """Print archive-level errors and warnings; True if a line was listed."""
     listed = False
     for violation in result.violations:
         if violation.member == _ARCHIVE_LEVEL and violation.action is not (
@@ -47,6 +42,13 @@ def _render_text(
             listed = True
         elif violation.action is ViolationAction.WARN and not quiet:
             ctx.warn(f"{printable(violation.member)}: {printable(violation.message)}")
+    return listed
+
+
+def _render_members(ctx: Context, result: ExtractResult, output: OutputOptions) -> bool:
+    """Print failed, skipped and (verbose) extracted members; True if any."""
+    quiet = output.quiet
+    listed = False
     for member in result.members:
         name = printable(member.member)
         if member.status in (MemberStatus.FAILED, MemberStatus.SKIPPED):
@@ -62,12 +64,11 @@ def _render_text(
             verb = "Would extract" if result.preview_only else "Extracting"
             ctx.out(f"{verb}: {name}")
             listed = True
+    return listed
 
-    if quiet:
-        return
-    if listed or ctx.warned:
-        ctx.out()
-    extra = []
+
+def _render_summary(ctx: Context, destination: str, result: ExtractResult) -> None:
+    extra: list[str] = []
     if result.skipped_count:
         extra.append(f"{result.skipped_count} skipped")
     if result.failed_count:
@@ -81,6 +82,21 @@ def _render_text(
         done = count(result.extracted_count, "member")
         size = human_size(result.bytes_written)
         ctx.out(f"Extracted to {target}: {done} ({size}){tail}")
+
+
+def _render_text(
+    ctx: Context,
+    destination: str,
+    result: ExtractResult,
+    output: OutputOptions,
+) -> None:
+    listed = _render_violations(ctx, result, quiet=output.quiet)
+    listed = _render_members(ctx, result, output) or listed
+    if output.quiet:
+        return
+    if listed or ctx.warned:
+        ctx.out()
+    _render_summary(ctx, destination, result)
 
 
 def report_plain(

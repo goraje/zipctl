@@ -11,15 +11,13 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
+
+from typing_extensions import override
 
 import ziplet
 from ziplet import ZipFile
 from ziplet.zipfile.info import ZipInfo
-
-if sys.platform != "win32":
-    import pty
-    import select
-    import signal
 
 HAS_PTY = sys.platform != "win32"
 
@@ -30,6 +28,8 @@ def _default_sigint() -> None:
     Python leaves KeyboardInterrupt off when it starts with SIGINT ignored, so
     the Ctrl-C tests would hang whenever the suite itself runs in the background.
     """
+    import signal  # POSIX only, and only called from the pty tests
+
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 
@@ -47,6 +47,7 @@ class Result:
     stdout: str
     stderr: str
 
+    @override
     def __str__(self) -> str:
         return (
             f"exit={self.returncode}\n--- stdout ---\n{self.stdout}"
@@ -66,6 +67,14 @@ def clean_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
 
 def command(*args: str) -> list[str]:
     return [sys.executable, "-m", "ziplet", *args]
+
+
+class RunOptions(TypedDict, total=False):
+    """The keyword options of :func:`run`, for helpers that pass them on."""
+
+    stdin: str | bytes | None
+    env: Mapping[str, str] | None
+    cwd: Path | None
 
 
 def run(
@@ -106,6 +115,10 @@ def run_in_terminal(
     Returns the result and the number of prompts seen.
     """
     assert HAS_PTY
+    import pty  # POSIX only, so imported here rather than at module level
+    import select
+    import signal
+
     master, slave = pty.openpty()
     proc = subprocess.Popen(
         command(*args),

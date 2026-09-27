@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -65,14 +66,11 @@ def test_inspection_does_not_open_payloads_or_modify_files(
     with ziplet.ZipFile(archive, "w") as zf:
         zf.writestr("payload.txt", b"payload")
 
+    def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
+        raise AssertionError("inspection opened a payload")
+
     with ziplet.ZipFile(archive) as zf:
-        monkeypatch.setattr(
-            zf,
-            "open",
-            lambda *args, **kwargs: (_ for _ in ()).throw(
-                AssertionError("inspection opened a payload")
-            ),
-        )
+        monkeypatch.setattr(zf, "open", forbidden)
         report = zf.inspect(tmp_path / "output")
 
     assert report.members[0].member == "payload.txt"

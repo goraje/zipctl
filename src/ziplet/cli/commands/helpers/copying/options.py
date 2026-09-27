@@ -5,13 +5,24 @@ from __future__ import annotations
 import argparse
 import os
 from dataclasses import dataclass
+from typing import Protocol
 
 from ziplet.cli.commands.helpers.output_options import (
+    OutputArgs,
     OutputOptions,
     add_output_options,
 )
 from ziplet.cli.errors import CliError, UsageError
 from ziplet.cli.output import printable
+
+
+class CopyArgs(OutputArgs, Protocol):
+    """What :func:`add_copy_options` leaves on the parsed arguments."""
+
+    input: str
+    output: str
+    force: bool
+    no_verify: bool
 
 
 @dataclass(frozen=True)
@@ -25,7 +36,7 @@ class CopyJob:
     report: OutputOptions
 
 
-def copy_job(args: argparse.Namespace) -> CopyJob:
+def copy_job(args: CopyArgs) -> CopyJob:
     return CopyJob(
         args.input,
         args.output,

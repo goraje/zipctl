@@ -35,9 +35,9 @@ class CliError(Exception):
         self, message: str, code: int = EXIT_FAILURE, details: tuple[str, ...] = ()
     ) -> None:
         super().__init__(message)
-        self.message = message
-        self.code = code
-        self.details = details
+        self.message: str = message
+        self.code: int = code
+        self.details: tuple[str, ...] = details
 
 
 class UsageError(CliError):
@@ -50,3 +50,9 @@ class UsageError(CliError):
 def os_error_text(exc: OSError) -> str:
     """The system's wording for *exc* (its message when it has no error code)."""
     return exc.strerror or str(exc)
+
+
+def os_error_filename(exc: OSError) -> str | None:
+    """The path *exc* is about, or ``None`` when it names none."""
+    name: object = exc.filename  # pyright: ignore[reportAny]  # typeshed: Any
+    return str(name) if name else None

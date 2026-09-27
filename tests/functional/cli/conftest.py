@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 
 from tests.functional.cli.support import Result, run
 
-CliRunner = Callable[..., Result]
+
+class CliRunner(Protocol):
+    def __call__(
+        self,
+        *args: str,
+        stdin: str | bytes | None = None,
+        env: Mapping[str, str] | None = None,
+        cwd: Path | None = None,
+    ) -> Result: ...
 
 
 @pytest.fixture

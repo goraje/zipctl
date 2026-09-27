@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import io
-from typing import Any, cast
+from typing import cast
 
 import pytest
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import ziplet
@@ -35,9 +36,13 @@ def derivations(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     """The salt of every PBKDF2 run from now on."""
     salts: list[bytes] = []
 
-    def counting(**kwargs: Any) -> Any:
-        salts.append(kwargs["salt"])
-        return PBKDF2HMAC(**kwargs)
+    def counting(
+        *, algorithm: hashes.HashAlgorithm, length: int, salt: bytes, iterations: int
+    ) -> PBKDF2HMAC:
+        salts.append(salt)
+        return PBKDF2HMAC(
+            algorithm=algorithm, length=length, salt=salt, iterations=iterations
+        )
 
     monkeypatch.setattr(aes, "PBKDF2HMAC", counting)
     return salts
@@ -89,7 +94,7 @@ def test_a_cached_key_is_still_checked_against_the_header_verifier(
 ) -> None:
     """Same password and salt but another verifier: rejected, not trusted."""
     with ZipFile(io.BytesIO(archive)) as zf, zf.open("a.txt", pwd=PASSWORD) as stream:
-        header = cast("ZipExtFile", stream).encryption_header
+        header = cast("ZipExtFile", stream).encryption_header  # pyright: ignore[reportInvalidCast]  # open() is typed IO[bytes]
         info = zf.getinfo("a.txt")
     cache = AesKeyCache()
     AesZipDecrypter(info, PASSWORD, header, cache)

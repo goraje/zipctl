@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable
 
+from typing_extensions import override
+
 __all__ = [
     "BZIP2_VERSION",
     "LZMA_VERSION",
@@ -62,9 +64,11 @@ class CompressorBase(ABC):
 class NoopCompressor(CompressorBase):
     """Pass-through compressor used for ``ZIP_STORED`` entries."""
 
+    @override
     def compress(self, data: bytes) -> bytes:
         return data
 
+    @override
     def flush(self) -> bytes:
         return b""
 
@@ -93,14 +97,16 @@ class NoopDecompressor(DecompressorBase):
     """Pass-through decompressor used for ``ZIP_STORED`` entries."""
 
     @property
+    @override
     def eof(self) -> bool:
         return False
 
+    @override
     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
         return data if max_length < 0 else data[:max_length]
 
 
-class StreamingDecompressor(DecompressorBase):
+class StreamingDecompressor(DecompressorBase, ABC):
     """Extended interface for stream-oriented decompressors.
 
     Extends DecompressorBase with support for bounded decompression,
@@ -129,6 +135,7 @@ class StreamingDecompressor(DecompressorBase):
         ...
 
     @abstractmethod
+    @override
     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
         """Decompresses a chunk of data.
 

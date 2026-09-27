@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import PASSWORD
 from ziplet import ZipFile
 
@@ -47,8 +48,9 @@ def files(workdir: Path) -> list[str]:
         return sorted(n for n in zf.namelist() if not n.endswith("/"))
 
 
+@pytest.mark.usefixtures("tree")
 def test_follow_is_the_default_and_stores_no_link(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     code, _, err = make(cli, workdir)
     assert code == 0, err
@@ -58,9 +60,8 @@ def test_follow_is_the_default_and_stores_no_link(
     assert "skipping t/broken: broken symbolic link" in err
 
 
-def test_store_keeps_every_link_as_a_link(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_store_keeps_every_link_as_a_link(cli: CliRunner, workdir: Path) -> None:
     code, out, err = make(cli, workdir, "--symlinks", "store")
     assert code == 0, err
     assert links(workdir) == {
@@ -82,8 +83,9 @@ def test_store_keeps_every_link_as_a_link(
         assert zf.getinfo("t/dlink").compress_type == 0
 
 
+@pytest.mark.usefixtures("tree")
 def test_skip_leaves_every_link_out_with_a_warning(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     code, _, err = make(cli, workdir, "--symlinks", "skip")
     assert code == 0, err
@@ -92,8 +94,9 @@ def test_skip_leaves_every_link_out_with_a_warning(
         assert f"skipping t/{name}: symbolic link" in err
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_link_named_on_the_command_line_follows_the_mode(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = cli("create", "a.zip", "t/flink", "--symlinks", "store", cwd=workdir)
     assert result.returncode == 0, result
@@ -110,9 +113,8 @@ def test_a_link_named_on_the_command_line_follows_the_mode(
     assert followed.returncode == 0
 
 
-def test_stored_links_are_encrypted_like_files(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_stored_links_are_encrypted_like_files(cli: CliRunner, workdir: Path) -> None:
     result = cli(
         "create", "out.zip", "t", "--symlinks", "store", "--encryption", "aes256",
         env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir,
@@ -128,8 +130,9 @@ def test_stored_links_are_encrypted_like_files(
     assert checked.returncode == 0, checked
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_protect_style_rule_can_cover_only_links(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = {
         "rules": [
@@ -146,9 +149,8 @@ def test_a_protect_style_rule_can_cover_only_links(
         assert not zf.getinfo("t/file.txt").is_encrypted
 
 
-def test_dry_run_shows_the_protection_of_links(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_dry_run_shows_the_protection_of_links(cli: CliRunner, workdir: Path) -> None:
     result = cli(
         "create", "out.zip", "t", "--symlinks", "store", "-n", "--encryption", "aes256",
         env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir,
@@ -169,9 +171,8 @@ def test_a_link_that_cannot_be_read_says_why_instead_of_calling_it_broken(
     assert "skipping t/broken: broken symbolic link" in err
 
 
-def test_exclude_applies_to_links_too(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_exclude_applies_to_links_too(cli: CliRunner, workdir: Path) -> None:
     code, _, err = make(
         cli, workdir, "--symlinks", "store", "--exclude", "*link", "--exclude", "broken"
     )
@@ -179,8 +180,9 @@ def test_exclude_applies_to_links_too(
     assert links(workdir) == {}
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_stored_link_is_extracted_only_when_the_policy_allows_it(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     assert make(cli, workdir, "--symlinks", "store")[0] == 0
     refused = cli("extract", "out.zip", "-d", "plain", cwd=workdir)
@@ -199,17 +201,17 @@ def test_a_stored_link_is_extracted_only_when_the_policy_allows_it(
     assert os.readlink(workdir / "back" / "t" / "dlink") == "real"
 
 
-def test_list_json_reports_stored_links(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_list_json_reports_stored_links(cli: CliRunner, workdir: Path) -> None:
     assert make(cli, workdir, "--symlinks", "store")[0] == 0
-    document = json.loads(cli("list", "out.zip", "--json", cwd=workdir).stdout)
+    document = load_json(cli("list", "out.zip", "--json", cwd=workdir), ListReport)
     flags = {m["name"]: m["is_symlink"] for m in document["members"]}
     assert flags["t/flink"] is True
     assert flags["t/file.txt"] is False
 
 
-def test_dry_run_marks_links(cli: CliRunner, workdir: Path, tree: Path) -> None:
+@pytest.mark.usefixtures("tree")
+def test_dry_run_marks_links(cli: CliRunner, workdir: Path) -> None:
     code, out, _ = make(cli, workdir, "--symlinks", "store", "-n")
     assert code == 0
     assert "Would add: t/flink (symlink)" in out.splitlines()
@@ -231,7 +233,6 @@ def test_a_link_target_that_is_not_utf8_is_refused(
     assert not (workdir / "out.zip").exists()
 
 
-def test_an_unknown_mode_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_an_unknown_mode_is_a_usage_error(cli: CliRunner, workdir: Path) -> None:
     assert make(cli, workdir, "--symlinks", "chase")[0] == 2

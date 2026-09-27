@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
-from ziplet.cli.commands.helpers.output_options import add_output_options
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
+from ziplet.cli.commands.helpers.output_options import OutputArgs, add_output_options
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     add_password_options,
     single_password,
@@ -34,6 +34,12 @@ _LINES = {
 }
 
 
+class CheckPasswordArgs(OutputArgs, PasswordArgs, Protocol):
+    archive: str
+    members: list[str]
+    full: bool
+
+
 def _summary(encrypted: int, accepted: int, full: bool) -> str:
     if not encrypted:
         return "No encrypted members to check"
@@ -45,7 +51,7 @@ def _summary(encrypted: int, accepted: int, full: bool) -> str:
 
 
 def _check(
-    zf: ZipFile, infos: list[ZipInfo], args: argparse.Namespace, ctx: Context
+    zf: ZipFile, infos: list[ZipInfo], args: CheckPasswordArgs, ctx: Context
 ) -> PasswordCheckResult:
     if not any(info.is_encrypted for info in infos):
         # Nothing to unlock, so do not ask for (or insist on) a password.
@@ -60,7 +66,7 @@ def _check(
         raise CliError(f"cannot check the password: {printable(str(exc))}") from None
 
 
-def cmd_check_password(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_check_password(args: CheckPasswordArgs, ctx: Context) -> int:
     with open_archive(args.archive) as zf:
         result = _check(zf, select_infos(zf.infolist(), args.members), args, ctx)
 
@@ -99,7 +105,7 @@ def cmd_check_password(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_OK if result.ok else EXIT_FAILURE
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "check-password",

@@ -50,7 +50,7 @@ class ValidatorPipeline:
     """Run validators in a deterministic order."""
 
     def __init__(self, validators: Iterable[MemberValidator]) -> None:
-        self._validators = tuple(validators)
+        self._validators: tuple[MemberValidator, ...] = tuple(validators)
 
     def validate(self, params: ValidatorParams) -> list[ExtractViolation]:
         violations: list[ExtractViolation] = []

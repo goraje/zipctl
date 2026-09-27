@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=46.0.6",
-    "typing-extensions>=4.0.0; python_version < '3.11'",
+    "typing-extensions>=4.4.0",
 ]
 
 [project.scripts]
@@ -58,16 +58,25 @@ dev = [
 target-version = "py310"
 extend-exclude = ["*.md"]
 lint.select = [
+    "A",
+    "ANN",
     "B",
+    "C4",
+    "C90",
     "E",
+    "ERA",
     "F",
     "I",
     "PIE",
     "PT",
+    "PYI",
     "SLF001",
     "TID251",
     "W",
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 # The library never imports the CLI; only the CLI, __main__ and tests may.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
@@ -83,6 +92,21 @@ lint.select = [
 # argparse has no public API for what these three files customise.
 "src/ziplet/cli/{parser,formatter}.py" = ["SLF001"]
 "src/ziplet/cli/commands/helpers/command.py" = ["SLF001"]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "recommended"
+# Ignored .write()/.add() results are normal here; `_ = ...` on every one is noise.
+reportUnusedCallResult = "none"
+# Long help and error text is wrapped as adjacent string literals throughout.
+reportImplicitStringConcatenation = "none"
+
+# Tests reach into private state on purpose; mirrors the ruff SLF001 exemption for tests/**.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportPrivateUsage = "none"
 
 [tool.pytest.ini_options]
 addopts = "-n auto"

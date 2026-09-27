@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
 from ziplet.cli.commands.helpers.copying.copy import read_passwords, run_copy
 from ziplet.cli.commands.helpers.copying.options import (
+    CopyArgs,
     add_copy_options,
     check_paths,
     copy_job,
 )
 from ziplet.cli.commands.helpers.copying.targets import PLAIN, keep_target
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     add_password_options,
     password_pool,
@@ -25,7 +26,11 @@ from ziplet.cli.errors import CliError
 from ziplet.cli.output import printable
 
 
-def cmd_decrypt(args: argparse.Namespace, ctx: Context) -> int:
+class DecryptArgs(CopyArgs, PasswordArgs, Protocol):
+    match: list[str]
+
+
+def cmd_decrypt(args: DecryptArgs, ctx: Context) -> int:
     job = copy_job(args)
     check_paths(job)
     with open_archive(job.input) as src:
@@ -46,7 +51,7 @@ def cmd_decrypt(args: argparse.Namespace, ctx: Context) -> int:
         return run_copy(ctx, src, passwords, targets, job, verb="Decrypted")
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "decrypt",

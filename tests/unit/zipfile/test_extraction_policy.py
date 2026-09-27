@@ -106,12 +106,11 @@ def test_policy_aborts_and_removes_partial_output_on_runtime_quota(
     with ziplet.ZipFile(archive, "w") as writer:
         writer.writestr("payload.bin", b"declared")
 
+    def oversized_open(*_args: object, **_kwargs: object) -> io.BytesIO:
+        return io.BytesIO(b"x" * 32)
+
     with ziplet.ZipFile(archive) as zf:
-        monkeypatch.setattr(
-            zf,
-            "open",
-            lambda *args, **kwargs: io.BytesIO(b"x" * 32),
-        )
+        monkeypatch.setattr(zf, "open", oversized_open)
         with pytest.raises(ExtractionError) as raised:
             zf.extractall(
                 output,
@@ -460,12 +459,12 @@ def test_inspection_reports_entry_count_once() -> None:
     ]
 
 
-def _reject_temp_files(info: ZipInfo, target: Path) -> None:
+def _reject_temp_files(info: ZipInfo, _target: Path) -> None:
     if info.filename.endswith(".tmp"):
         raise ValueError(f"{info.filename}: temporary files are not allowed")
 
 
-def _reject_large_names(info: ZipInfo, target: Path) -> None:
+def _reject_large_names(info: ZipInfo, _target: Path) -> None:
     if len(info.filename) > 8:
         raise ValueError(f"{info.filename}: name is too long")
 
@@ -522,7 +521,7 @@ def test_custom_validator_chain_can_skip_members(tmp_path: Path) -> None:
 
 
 def test_custom_validator_unexpected_error_propagates(tmp_path: Path) -> None:
-    def broken(info: ZipInfo, target: Path) -> None:
+    def broken(_info: ZipInfo, _target: Path) -> None:
         raise KeyError("bug in validator")
 
     with ziplet.ZipFile(_custom_archive()) as zf:

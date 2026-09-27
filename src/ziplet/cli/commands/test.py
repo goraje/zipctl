@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import CHUNK, open_archive
-from ziplet.cli.commands.helpers.command import add_command
-from ziplet.cli.commands.helpers.output_options import add_output_options
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
+from ziplet.cli.commands.helpers.output_options import OutputArgs, add_output_options
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     add_password_options,
     password_pool,
 )
 from ziplet.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
 from ziplet.cli.commands.helpers.progress import (
+    ProgressArgs,
     ProgressRenderer,
     StepReporter,
     add_progress_option,
@@ -32,6 +33,11 @@ from ziplet.cli.output import (
 from ziplet.exceptions import BadZipFile
 from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
+
+
+class TestArgs(OutputArgs, PasswordArgs, ProgressArgs, Protocol):
+    archive: str
+    members: list[str]
 
 
 @dataclass(frozen=True)
@@ -84,7 +90,7 @@ def _test_members(
     renderer: ProgressRenderer | None,
 ) -> list[Tested]:
     steps = StepReporter(renderer, ((i.filename, i.file_size) for i in infos))
-    results = []
+    results: list[Tested] = []
     for index, info in enumerate(infos):
         steps.start(index)
         if renderer is not None and info.is_encrypted:
@@ -95,7 +101,7 @@ def _test_members(
     return results
 
 
-def cmd_test(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_test(args: TestArgs, ctx: Context) -> int:
     with progress_renderer(ctx.stderr, args.progress) as renderer:
         with open_archive(args.archive) as zf:
             pool = password_pool(PasswordOptions.from_args(args), ctx)
@@ -118,7 +124,7 @@ def cmd_test(args: argparse.Namespace, ctx: Context) -> int:
             },
         )
     else:
-        lines = []
+        lines: list[str] = []
         for result in results:
             if not result.ok:
                 name, detail = printable(result.name), printable(result.detail or "")
@@ -137,7 +143,7 @@ def cmd_test(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_FAILURE if failed else EXIT_OK
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers, "test", cmd_test, "read every member and check its integrity"
     )

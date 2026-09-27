@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from ziplet.cli.errors import CliError, os_error_text
@@ -27,7 +27,7 @@ def _sync_directory(directory: str) -> None:
 
 
 @contextmanager
-def replacing(path: str, *, overwrite: bool, seed: bool = False) -> Iterator[str]:
+def replacing(path: str, *, overwrite: bool, seed: bool = False) -> Generator[str]:
     """Yield a scratch path beside *path*; move it onto *path* if the block succeeds.
 
     The scratch file is removed if the block raises (Ctrl-C included), so *path*

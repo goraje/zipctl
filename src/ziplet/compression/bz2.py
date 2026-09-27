@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing_extensions import override
+
 from ziplet.compression.methods import (
     ZIP_BZIP2,
     CompressionEntry,
@@ -25,10 +27,11 @@ try:
                     If None, the default compression level is used.
             """
             if level is not None:
-                self._c = bz2.BZ2Compressor(level)
+                self._c: bz2.BZ2Compressor = bz2.BZ2Compressor(level)
             else:
                 self._c = bz2.BZ2Compressor()
 
+        @override
         def compress(self, data: bytes) -> bytes:
             """Compresses a chunk of data.
 
@@ -40,6 +43,7 @@ try:
             """
             return self._c.compress(data)
 
+        @override
         def flush(self) -> bytes:
             """Flushes any remaining buffered data and finalizes the stream.
 
@@ -57,9 +61,10 @@ try:
 
         def __init__(self) -> None:
             """Initializes the decompressor."""
-            self._d = bz2.BZ2Decompressor()
+            self._d: bz2.BZ2Decompressor = bz2.BZ2Decompressor()
 
         @property
+        @override
         def eof(self) -> bool:
             """Whether the end of the compressed stream has been reached.
 
@@ -73,6 +78,7 @@ try:
         def needs_input(self) -> bool:
             return self._d.needs_input
 
+        @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
             """Decompresses a chunk of data.
 

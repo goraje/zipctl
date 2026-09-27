@@ -6,7 +6,7 @@ import io
 import random
 import struct
 import zlib
-from typing import Any, cast
+from typing import NoReturn, cast
 
 import pytest
 
@@ -25,6 +25,7 @@ DATA = b" ".join(
     bytes(_RANDOM.choices(b"abcdefghij", k=_RANDOM.randint(2, 30))) for _ in range(3000)
 )
 CRC = zlib.crc32(DATA)
+DATA_SIZE = len(DATA)
 
 # name -> (scheme, AES version); the password is PASSWORD for every encrypted one
 PROTECTIONS: dict[str, tuple[str | None, int | None]] = {
@@ -68,11 +69,11 @@ def flip_data_byte(archive: bytes, offset: int) -> bytes:
 
 def payload(zf: ZipFile, pwd: bytes | None) -> bytes:
     """The compressed bytes of the only member, decrypted."""
-    reader = cast(ZipExtFile, zf.open("f.bin", "r", pwd))
+    reader = cast(ZipExtFile, zf.open("f.bin", "r", pwd))  # pyright: ignore[reportInvalidCast]  # open() is typed IO[bytes]
     return b"".join(reader._raw_chunks())
 
 
-def copy(source: bytes, target: str, *, crc: int = CRC, size: int = len(DATA)) -> bytes:
+def copy(source: bytes, target: str, *, crc: int = CRC, size: int = DATA_SIZE) -> bytes:
     scheme, version = PROTECTIONS[target]
     out = io.BytesIO()
     with ZipFile(io.BytesIO(source)) as src, ZipFile(out, "w") as dst:
@@ -101,7 +102,9 @@ def test_the_compressed_data_survives_any_change_of_protection(
 ) -> None:
     original = make(source)
 
-    def no_compressor(*args: Any) -> Any:
+    def no_compressor(
+        _compress_type: int, _compresslevel: int | None = None
+    ) -> NoReturn:
         raise AssertionError("a raw copy must not compress")
 
     monkeypatch.setattr(registry, "get_compressor", no_compressor)

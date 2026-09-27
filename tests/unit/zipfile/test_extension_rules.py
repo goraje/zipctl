@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Collection
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TypeAlias, cast
 
 import pytest
 
 import ziplet
 from ziplet import ExtractPolicy, ExtractPolicyRule, ViolationAction
 from ziplet.zipfile.validators import extension_chains
+
+_Field: TypeAlias = frozenset[str] | ExtractPolicyRule[frozenset[str]] | None
+_Extensions: TypeAlias = Collection[str] | ExtractPolicyRule[frozenset[str]] | None
 
 BASE_POLICY = ExtractPolicy(
     max_compression_ratio=None,
@@ -34,14 +38,19 @@ def _flagged(
     }
 
 
-def _blocked(names: list[str], tmp_path: Path, extensions: Any) -> set[str]:
-    policy = replace(BASE_POLICY, blocked_extensions=extensions)
+def _as_field(extensions: _Extensions) -> _Field:
+    """Pass *extensions* on as the field type; the policy accepts any collection."""
+    return cast("_Field", extensions)
+
+
+def _blocked(names: list[str], tmp_path: Path, extensions: _Extensions) -> set[str]:
+    policy = replace(BASE_POLICY, blocked_extensions=_as_field(extensions))
     result = _flagged(names, tmp_path, policy)
     return {name for name, codes in result.items() if "extension_blocked" in codes}
 
 
-def _rejected(names: list[str], tmp_path: Path, extensions: Any) -> set[str]:
-    policy = replace(BASE_POLICY, allowed_extensions=extensions)
+def _rejected(names: list[str], tmp_path: Path, extensions: _Extensions) -> set[str]:
+    policy = replace(BASE_POLICY, allowed_extensions=_as_field(extensions))
     result = _flagged(names, tmp_path, policy)
     return {name for name, codes in result.items() if "extension_not_allowed" in codes}
 

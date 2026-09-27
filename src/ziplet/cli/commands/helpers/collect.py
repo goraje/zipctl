@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ziplet.cli.commands.helpers.selection import glob_matcher
-from ziplet.cli.errors import CliError, os_error_text
+from ziplet.cli.errors import CliError, os_error_filename, os_error_text
 from ziplet.cli.output import printable
 
 __all__ = ["Collector", "Entry"]
@@ -49,9 +49,8 @@ def _stored_name(name: str) -> str:
 
 def _unreadable(exc: OSError) -> None:
     """``os.walk`` would skip a directory it cannot list; a backup must not."""
-    raise CliError(
-        f"cannot read {printable(str(exc.filename))}: {os_error_text(exc)}"
-    ) from None
+    where = printable(os_error_filename(exc) or "")
+    raise CliError(f"cannot read {where}: {os_error_text(exc)}") from None
 
 
 def _join(prefix: str, name: str) -> str:
@@ -79,8 +78,8 @@ class Collector:
         symlinks: str = "follow",
     ) -> None:
         """*symlinks* is ``follow``, ``store`` or ``skip`` (see ``--symlinks``)."""
-        self.base = base
-        self.symlinks = symlinks
+        self.base: str | None = base
+        self.symlinks: str = symlinks
         try:
             self._archive_stat: os.stat_result | None = os.stat(archive)
         except OSError:  # not written yet, so nothing collected can be it
@@ -88,7 +87,9 @@ class Collector:
         self.entries: list[Entry] = []
         self.skipped: list[tuple[str, str]] = []
         self._seen: set[str] = set()
-        self._exclude = [(p, glob_matcher(p.rstrip("/") or p)) for p in exclude]
+        self._exclude: list[tuple[str, Callable[[str], bool]]] = [
+            (p, glob_matcher(p.rstrip("/") or p)) for p in exclude
+        ]
         self._used: set[str] = set()
 
     def unused_excludes(self) -> list[str]:

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
 import pytest
 
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import (
+    PolicyShowDocument,
+    PolicyValidateReport,
+    load_json,
+)
 from tests.functional.cli.support import write_archive
 from ziplet import ExtractPolicy, policy_from_json, policy_to_json
 
@@ -28,7 +32,7 @@ def test_show_prints_the_default_policy_as_json(cli: CliRunner) -> None:
     result = cli("policy", "show")
     assert result.returncode == 0, result
     assert result.stdout == policy_to_json(ExtractPolicy()) + "\n"
-    assert json.loads(result.stdout)["version"] == 1
+    assert load_json(result, PolicyShowDocument)["version"] == 1
 
 
 def test_show_applies_the_file_then_the_inline_document(
@@ -45,7 +49,8 @@ def test_show_applies_the_file_then_the_inline_document(
     assert policy.on_violation == ExtractPolicy().on_violation
 
 
-def test_show_output_is_a_fixed_point(cli: CliRunner, workdir: Path) -> None:
+@pytest.mark.usefixtures("workdir")
+def test_show_output_is_a_fixed_point(cli: CliRunner) -> None:
     """What ``show`` prints, ``show --policy -`` prints back unchanged."""
     first = cli(
         "policy", "show", "--policy-json",
@@ -61,7 +66,10 @@ def test_show_normalises_extensions(cli: CliRunner) -> None:
     result = cli(
         "policy", "show", "--policy-json", '{"allowed_extensions": [".TXT", ".Md"]}'
     )
-    assert json.loads(result.stdout)["allowed_extensions"] == [".md", ".txt"]
+    assert load_json(result, PolicyShowDocument)["allowed_extensions"] == [
+        ".md",
+        ".txt",
+    ]
 
 
 def test_show_rejects_an_invalid_policy(cli: CliRunner) -> None:
@@ -172,7 +180,7 @@ def test_validate_json_output(cli: CliRunner, workdir: Path) -> None:
     bad = _write(workdir, '{"oops": 1}', "bad.json")
     result = cli("policy", "validate", "--json", str(good), str(bad))
     assert result.returncode == 2
-    document = json.loads(result.stdout)
+    document = load_json(result, PolicyValidateReport)
     assert document["ok"] is False
     by_file = {entry["file"]: entry for entry in document["files"]}
     assert by_file[str(good)] == {"file": str(good), "valid": True, "issues": []}
@@ -187,7 +195,7 @@ def test_validate_json_output_for_valid_files_exits_zero(
     good = _write(workdir, "{}")
     result = cli("policy", "validate", "--json", str(good))
     assert result.returncode == 0
-    assert json.loads(result.stdout)["ok"] is True
+    assert load_json(result, PolicyValidateReport)["ok"] is True
 
 
 def test_validate_problems_with_the_file_itself(cli: CliRunner, workdir: Path) -> None:
@@ -209,7 +217,7 @@ def test_validate_goes_on_after_an_unreadable_file(
     good = _write(workdir, b"{}", "good.json")
     result = cli("policy", "validate", str(workdir / "nope.json"), str(good), "--json")
     assert result.returncode == 2, result
-    report = json.loads(result.stdout)
+    report = load_json(result, PolicyValidateReport)
     assert [f["valid"] for f in report["files"]] == [False, True]
     assert "cannot read policy file" in report["files"][0]["issues"][0]["message"]
 
@@ -225,7 +233,7 @@ def test_hostile_file_names_are_escaped(cli: CliRunner, workdir: Path) -> None:
 
 def _readme_json_blocks() -> list[str]:
     text = README.read_text(encoding="utf-8")
-    blocks = re.findall(r"```json\n(.*?)```", text, flags=re.DOTALL)
+    blocks = [m[1] for m in re.finditer(r"```json\n(.*?)```", text, flags=re.DOTALL)]
     return [
         block for block in blocks if '"version"' in block and '"match"' not in block
     ]

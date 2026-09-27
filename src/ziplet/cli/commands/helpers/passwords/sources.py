@@ -52,7 +52,7 @@ def prompt_password(label: str) -> str:
     """
     try:
         if sys.version_info >= (3, 14):
-            return getpass.getpass(label, echo_char="*")
+            return getpass.getpass(label, echo_char="*")  # pyright: ignore[reportUnreachable]  # branch depends on the Python version
         return getpass.getpass(label)
     except EOFError:
         return ""

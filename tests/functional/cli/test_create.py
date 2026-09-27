@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import stat
 import zipfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
 
 import pytest
+from typing_extensions import Unpack
 
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import CreateReport, load_json
+from tests.functional.cli.support import Result, RunOptions
 from ziplet import ZipFile
 from ziplet.compression import registry
 
@@ -61,7 +63,7 @@ def leftovers(directory: Path) -> list[str]:
     return sorted(p.name for p in directory.iterdir() if p.name.startswith(".ziplet-"))
 
 
-def make(cli: CliRunner, workdir: Path, *args: str, **kw: Any) -> Any:
+def make(cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]) -> Result:
     """``ziplet create out.zip ARGS``, run in *workdir* (where ``src`` lives)."""
     kw.setdefault("cwd", workdir)
     return cli("create", str(workdir / "out.zip"), *args, **kw)
@@ -70,9 +72,8 @@ def make(cli: CliRunner, workdir: Path, *args: str, **kw: Any) -> Any:
 # --- what gets stored
 
 
-def test_a_directory_tree_round_trips(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_a_directory_tree_round_trips(cli: CliRunner, workdir: Path) -> None:
     result = make(cli, workdir, "src")
     assert result.returncode == 0, result
     archive = workdir / "out.zip"
@@ -85,8 +86,9 @@ def test_a_directory_tree_round_trips(
     )
 
 
+@pytest.mark.usefixtures("source")
 def test_the_standard_library_reads_what_we_write(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     make(cli, workdir, "src")
     with zipfile.ZipFile(workdir / "out.zip") as zf:
@@ -96,8 +98,9 @@ def test_the_standard_library_reads_what_we_write(
         } == EXPECTED
 
 
+@pytest.mark.usefixtures("source")
 def test_the_result_extracts_and_tests_clean_with_our_own_commands(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     make(cli, workdir, "src")
     assert cli("test", str(workdir / "out.zip")).returncode == 0
@@ -109,7 +112,8 @@ def test_the_result_extracts_and_tests_clean_with_our_own_commands(
     assert (out / "src" / "empty").is_dir()
 
 
-def test_order_is_deterministic(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_order_is_deterministic(cli: CliRunner, workdir: Path) -> None:
     make(cli, workdir, "src")
     first = names(workdir / "out.zip")
     make(cli, workdir, "src", "--force")
@@ -180,8 +184,9 @@ def test_paths_that_climb_out_are_refused(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("source")
 def test_a_missing_path_fails_before_anything_is_written(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = make(cli, workdir, "src", str(workdir / "missing"))
     assert result.returncode == 1, result
@@ -190,8 +195,9 @@ def test_a_missing_path_fails_before_anything_is_written(
     assert leftovers(workdir) == []
 
 
+@pytest.mark.usefixtures("source")
 def test_repeated_and_overlapping_paths_are_stored_once(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = make(cli, workdir, "src", "src/a.txt", "./src/../src", "src/")
     assert result.returncode == 0, result
@@ -292,9 +298,8 @@ def test_a_named_fifo_is_an_error_not_a_hang(cli: CliRunner, workdir: Path) -> N
     assert not (workdir / "out.zip").exists()
 
 
-def test_the_archive_is_never_added_to_itself(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("workdir")
+def test_the_archive_is_never_added_to_itself(cli: CliRunner, source: Path) -> None:
     target = source / "self.zip"
     result = cli("create", str(target), str(source))
     assert result.returncode == 0, result
@@ -325,12 +330,13 @@ def test_a_file_name_that_is_not_utf8_is_refused_cleanly(
 # --- compression
 
 
+@pytest.mark.usefixtures("source")
 @pytest.mark.parametrize(
     ("method", "code"),
     [("store", 0), ("deflate", 8), ("bzip2", 12), ("lzma", 14), ("zstd", 93)],
 )
 def test_every_compression_method(
-    cli: CliRunner, workdir: Path, source: Path, method: str, code: int
+    cli: CliRunner, workdir: Path, method: str, code: int
 ) -> None:
     if code == 93 and registry._registry.get(93) is None:
         result = make(cli, workdir, "src", "--compression", "zstd")
@@ -407,8 +413,9 @@ def test_comment(cli: CliRunner, workdir: Path) -> None:
 # --- an existing archive
 
 
+@pytest.mark.usefixtures("source")
 def test_an_existing_archive_is_refused_and_left_alone(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "out.zip").write_bytes(b"precious")
     result = make(cli, workdir, "src")
@@ -419,14 +426,16 @@ def test_an_existing_archive_is_refused_and_left_alone(
     assert leftovers(workdir) == []
 
 
-def test_force_replaces(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_force_replaces(cli: CliRunner, workdir: Path) -> None:
     (workdir / "out.zip").write_bytes(b"old")
     assert make(cli, workdir, "src", "--force").returncode == 0
     assert contents(workdir / "out.zip") == EXPECTED
 
 
+@pytest.mark.usefixtures("source")
 def test_a_failed_forced_run_keeps_the_old_archive(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     make(cli, workdir, "src")
     before = (workdir / "out.zip").read_bytes()
@@ -507,9 +516,10 @@ def test_append_does_not_treat_a_directory_already_in_the_archive_as_a_clash(
     assert "src/docs/new.txt" in listed
 
 
+@pytest.mark.usefixtures("source")
 @pytest.mark.parametrize("how", ["itself", "hard-link"])
 def test_the_archive_being_replaced_is_not_added_to_itself(
-    cli: CliRunner, workdir: Path, source: Path, how: str
+    cli: CliRunner, workdir: Path, how: str
 ) -> None:
     assert make(cli, workdir, "src/a.txt").returncode == 0
     others = []
@@ -582,9 +592,8 @@ def test_the_archive_gets_ordinary_permissions(
     )  # readable by others, as a normal new file would be under umask 022 (test env)
 
 
-def test_the_archive_directory_must_exist(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_the_archive_directory_must_exist(cli: CliRunner, workdir: Path) -> None:
     result = cli("create", str(workdir / "nodir" / "out.zip"), "src", cwd=workdir)
     assert result.returncode == 1, result
     assert "cannot create" in result.stderr
@@ -593,7 +602,8 @@ def test_the_archive_directory_must_exist(
 # --- output
 
 
-def test_verbose_lists_each_member(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_verbose_lists_each_member(cli: CliRunner, workdir: Path) -> None:
     result = make(cli, workdir, "src", "-v")
     lines = result.stdout.splitlines()
     assert "Adding: src/a.txt (deflate, none)" in lines
@@ -603,16 +613,18 @@ def test_verbose_lists_each_member(cli: CliRunner, workdir: Path, source: Path) 
     assert "" not in lines[:-2]
 
 
-def test_quiet_prints_nothing(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_quiet_prints_nothing(cli: CliRunner, workdir: Path) -> None:
     result = make(cli, workdir, "src", "-q")
     assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
 
 
-def test_json_report(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_json_report(cli: CliRunner, workdir: Path) -> None:
     result = make(cli, workdir, "src", "--json", "--compression", "store")
     assert result.returncode == 0
     assert result.stderr == ""
-    document = json.loads(result.stdout)
+    document = load_json(result, CreateReport)
     assert document["ok"] is True
     assert document["archive"] == str(workdir / "out.zip")
     assert (
@@ -644,7 +656,9 @@ def test_hostile_names_are_escaped_in_reports(cli: CliRunner, workdir: Path) -> 
     result = make(cli, workdir, str(tree), "-v")
     assert "\x1b" not in result.stdout + result.stderr
     assert "evil\\x1b[31mname" in result.stdout
-    document = json.loads(make(cli, workdir, str(tree), "--json", "--force").stdout)
+    document = load_json(
+        make(cli, workdir, str(tree), "--json", "--force"), CreateReport
+    )
     assert any(m["name"].endswith(name) for m in document["members"])
 
 
@@ -662,15 +676,18 @@ def test_the_help_lists_the_command(cli: CliRunner) -> None:
     assert "fips" not in text.lower()
 
 
+@pytest.mark.usefixtures("source")
 def test_members_are_added_in_sorted_order_whatever_the_file_system_returns(
-    workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
+    workdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from ziplet.cli import main
 
     real_walk = os.walk
 
-    def backwards(top: str, **kwargs: Any) -> Any:
-        for root, dirs, files in real_walk(top, **kwargs):
+    def backwards(
+        top: str, *, onerror: Callable[[OSError], None] | None = None
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        for root, dirs, files in real_walk(top, onerror=onerror):
             dirs.sort(reverse=True)
             files.sort(reverse=True)
             yield root, dirs, files

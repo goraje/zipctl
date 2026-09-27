@@ -1,10 +1,16 @@
 """Writable file-like object for streaming data into a ZIP archive entry."""
 
+# Friend access inside the zipfile package (ruff exempts it via SLF001).
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import io
+import threading
 from enum import Enum
 from typing import IO, TYPE_CHECKING, cast
+
+from typing_extensions import override
 
 from ziplet.compression import Registry, registry
 from ziplet.compression.methods import CompressorBase
@@ -17,7 +23,7 @@ if TYPE_CHECKING:
 from ziplet.cryptography.base import BaseZipEncryptor
 from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.shared import ZIP64_LIMIT, crc32
-from ziplet.zipfile.write_coordinator import WriterReservation
+from ziplet.zipfile.write_coordinator import WriteCoordinator, WriterReservation
 
 __all__ = ["ZipWriteFile"]
 
@@ -69,11 +75,11 @@ class ZipWriteFile(io.BufferedIOBase):
         # Inert until fully built, so a failure below (say, an unusable
         # compression level) does not make close() misbehave when the
         # half-built object is finalised.
-        self._state = WriteState.CLOSED
+        self._state: WriteState = WriteState.CLOSED
         self._zinfo: ZipInfo = zinfo
         self._zip64: bool = zip64
         self._zipfile: ZipFile = zf
-        self._raw = raw
+        self._raw: bool = raw
         self._compressor: CompressorBase | None = (
             None
             if raw
@@ -87,7 +93,7 @@ class ZipWriteFile(io.BufferedIOBase):
         self._crc: int = zinfo.CRC if raw else 0
         self._state = WriteState.ACTIVE
         self._error: BaseException | None = None
-        self._reservation = reservation
+        self._reservation: WriterReservation | None = reservation
 
         if self._encryptor is not None:
             self._encryptor.update_zipinfo(self._zinfo)
@@ -113,6 +119,7 @@ class ZipWriteFile(io.BufferedIOBase):
         """Always ``'wb'`` for a write-mode entry."""
         return "wb"
 
+    @override
     def writable(self) -> bool:
         """Return ``True``; this stream is always writable."""
         return True
@@ -140,6 +147,7 @@ class ZipWriteFile(io.BufferedIOBase):
         self._compress_size += len(buf)
         _write_all(self._fileobj, buf)
 
+    @override
     def write(self, data: ReadableBuffer, /) -> int:
         """Write *data* to the ZIP entry, compressing and encrypting as needed.
 
@@ -164,8 +172,6 @@ class ZipWriteFile(io.BufferedIOBase):
         # Accept any data that supports the buffer protocol
         if isinstance(data, (bytes, bytearray)):
             nbytes = len(data)
-        elif isinstance(data, memoryview):
-            nbytes = data.nbytes
         else:
             data = memoryview(data)
             nbytes = data.nbytes
@@ -195,6 +201,7 @@ class ZipWriteFile(io.BufferedIOBase):
         self._compress_size += len(data)
         _write_all(self._fileobj, data)
 
+    @override
     def close(self) -> None:
         """Flush, finalise, and close the entry.
 
@@ -208,24 +215,13 @@ class ZipWriteFile(io.BufferedIOBase):
             RuntimeError: If a non-ZIP64 entry exceeds the 4 GiB ZIP64 limit
                 for either the uncompressed or compressed size.
         """
-        coordinator = getattr(self._zipfile, "_write_coordinator", None)
+        # Tests hand in minimal parent objects that have no coordinator.
+        coordinator: WriteCoordinator | None = getattr(
+            self._zipfile, "_write_coordinator", None
+        )
         condition = coordinator.condition if coordinator is not None else None
-        if condition is not None:
-            with condition:
-                if self._state in (WriteState.COMMITTED, WriteState.CLOSED):
-                    return
-                if self._state == WriteState.FAILED:
-                    assert self._error is not None
-                    raise self._error
-                if self._state == WriteState.FINALIZING:
-                    condition.wait_for(
-                        lambda: self._state in (WriteState.COMMITTED, WriteState.FAILED)
-                    )
-                    state = cast(WriteState, self._state)
-                    if state == WriteState.FAILED:
-                        assert self._error is not None
-                        raise self._error
-                    return
+        if condition is not None and self._settled_by_another_close(condition):
+            return
         self._state = WriteState.FINALIZING
         if self._reservation is not None:
             self._zipfile._write_coordinator.begin_finalization(self._reservation)
@@ -248,6 +244,28 @@ class ZipWriteFile(io.BufferedIOBase):
             raise
         finally:
             super().close()
+
+    def _settled_by_another_close(self, condition: threading.Condition) -> bool:
+        """True if an earlier or concurrent ``close`` already finished this entry.
+
+        Raises the error of a failed close.
+        """
+        with condition:
+            if self._state in (WriteState.COMMITTED, WriteState.CLOSED):
+                return True
+            if self._state == WriteState.FAILED:
+                assert self._error is not None
+                raise self._error
+            if self._state == WriteState.FINALIZING:
+                condition.wait_for(
+                    lambda: self._state in (WriteState.COMMITTED, WriteState.FAILED)
+                )
+                state = cast(WriteState, self._state)
+                if state == WriteState.FAILED:
+                    assert self._error is not None
+                    raise self._error
+                return True
+        return False
 
     def _write_final_payload(self) -> None:
         """Flush compression/encryption and write the final payload bytes."""
@@ -287,6 +305,7 @@ def _write_all(fileobj: IO[bytes], data: bytes) -> None:
     view = memoryview(data)
     while view:
         written = fileobj.write(view)
-        if written is None or written <= 0:
+        # Raw streams may return None; typeshed types write() as int.
+        if written is None or written <= 0:  # pyright: ignore[reportUnnecessaryComparison]
             raise io.BlockingIOError(0, "short write", len(view))
         view = view[written:]

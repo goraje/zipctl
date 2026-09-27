@@ -1,3 +1,6 @@
+# Import cycle through zipfile.info, which base.py imports to annotate ZipInfo.
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 from ziplet.cryptography.aes import (

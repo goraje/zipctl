@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from ziplet.cli.commands.helpers.output_options import OutputOptions
 from ziplet.cli.context import Context
 from ziplet.cli.methods import NO_ENCRYPTION
-from ziplet.cli.output import count, human_size, printable, write_json
+from ziplet.cli.output import JsonValue, count, human_size, printable, write_json
 
 __all__ = ["Added", "Planned", "report_created", "report_dry_run"]
 
@@ -56,7 +55,9 @@ def _warn_skipped(
         ctx.warn(f"--exclude {printable(pattern)!r} matched nothing")
 
 
-def _skipped_json(skipped: list[tuple[str, str]], unused: list[str]) -> dict[str, Any]:
+def _skipped_json(
+    skipped: list[tuple[str, str]], unused: list[str]
+) -> dict[str, JsonValue]:
     return {
         "skipped": [{"path": p, "reason": r} for p, r in skipped],
         "unused_excludes": unused,

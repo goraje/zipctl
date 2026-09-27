@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, cast
+
 import pytest
 
 from ziplet.compression import bz2, deflate, lzma, zstd
@@ -18,7 +20,12 @@ from ziplet.compression.methods import (
 
 SAMPLE_DATA = b"Hello, codec world! " * 100
 
-CODECS = {
+
+class _CodecModule(Protocol):
+    compression_entry: CompressionEntry | None
+
+
+CODECS: dict[str, tuple[_CodecModule, int]] = {
     "deflate": (deflate, ZIP_DEFLATED),
     "bzip2": (bz2, ZIP_BZIP2),
     "lzma": (lzma, ZIP_LZMA),
@@ -28,9 +35,10 @@ CODECS = {
 
 @pytest.fixture(params=list(CODECS))
 def codec(request: pytest.FixtureRequest) -> CompressionEntry:
-    module, _ = CODECS[request.param]
+    name = cast("str", request.param)
+    module, _ = CODECS[name]
     if module.compression_entry is None:
-        pytest.skip(f"{request.param} not available")
+        pytest.skip(f"{name} not available")
     assert isinstance(module.compression_entry, CompressionEntry)
     return module.compression_entry
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import ErrorReport, ListReport, load_json
 from tests.functional.cli.support import PASSWORD, data_offset, flip_byte, write_archive
 
 
@@ -39,7 +39,7 @@ def test_json_is_ascii_whatever_the_terminal_encoding(
         result = cli("list", "--json", str(path), env={"PYTHONIOENCODING": encoding})
         assert result.returncode == 0, result
         assert result.stdout.isascii()
-        member = json.loads(result.stdout)["members"][0]
+        member = load_json(result, ListReport)["members"][0]
         assert member["name"] == "\U0001f600日.txt"
 
 
@@ -59,7 +59,7 @@ def test_running_from_another_directory_with_relative_paths(
     result = cli("list", "rel.zip", cwd=workdir)
     assert result.returncode == 0, result
     assert result.stdout == "a.txt\n"
-    document = json.loads(cli("list", "--json", "rel.zip", cwd=workdir).stdout)
+    document = load_json(cli("list", "--json", "rel.zip", cwd=workdir), ListReport)
     assert document["archive"] == "rel.zip"
 
 
@@ -131,7 +131,7 @@ def test_a_failure_under_json_is_a_document_on_standard_output(
 ) -> None:
     result = cli("list", str(workdir / "missing.zip"), "--json")
     assert result.returncode == 1, result
-    document = json.loads(result.stdout)
+    document = load_json(result, ErrorReport)
     assert document["ok"] is False
     assert document["code"] == 1
     assert "missing.zip" in document["error"]

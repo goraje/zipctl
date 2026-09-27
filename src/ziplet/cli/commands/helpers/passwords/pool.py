@@ -55,10 +55,10 @@ class PasswordPool:
         can_prompt: bool,
         prompt: Callable[[str], str] = prompt_password,
     ) -> None:
-        self._known = list(known)
-        self._ctx = ctx
-        self._can_prompt = can_prompt
-        self._prompt = prompt
+        self._known: list[bytes] = list(known)
+        self._ctx: Context = ctx
+        self._can_prompt: bool = can_prompt
+        self._prompt: Callable[[str], str] = prompt
 
     @staticmethod
     def _status(zf: ZipFile, info: ZipInfo, password: bytes) -> PasswordStatus:

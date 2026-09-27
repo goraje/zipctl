@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from typing_extensions import Unpack
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
@@ -21,7 +22,7 @@ from tests.functional.cli.rewrite_support import (
     schemes,
     snapshot,
 )
-from tests.functional.cli.support import HAS_PTY
+from tests.functional.cli.support import HAS_PTY, Result, RunOptions
 from tests.functional.cli.support import run_in_terminal as terminal
 from ziplet import ZipFile
 from ziplet.compression import registry
@@ -49,7 +50,9 @@ def secret(workdir: Path) -> Path:
     )
 
 
-def rewrite(cli: CliRunner, workdir: Path, *args: str, **kw: object):  # type: ignore[no-untyped-def]
+def rewrite(
+    cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]
+) -> Result:
     return cli(
         "rewrite", str(workdir / "in.zip"), str(workdir / "out.zip"), *args, **kw
     )
@@ -124,14 +127,16 @@ def test_recompress_level_changes_the_size(cli: CliRunner, workdir: Path) -> Non
     assert sizes["9"] < sizes["1"]
 
 
-def test_a_level_needs_recompress(cli: CliRunner, workdir: Path, secret: Path) -> None:
+@pytest.mark.usefixtures("secret")
+def test_a_level_needs_recompress(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "-L", "9", env=OLD)
     assert result.returncode == 2, result
     assert "--compression" in result.stderr
     assert not (workdir / "out.zip").exists()
 
 
-def test_a_bad_level_fails_cleanly(cli: CliRunner, workdir: Path, secret: Path) -> None:
+@pytest.mark.usefixtures("secret")
+def test_a_bad_level_fails_cleanly(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "--compression", "deflate", "-L", "99", env=OLD)
     assert result.returncode == 2, result
     assert "out of range for deflate" in result.stderr
@@ -254,7 +259,8 @@ def test_a_plain_archive_can_be_protected_without_an_old_password(
     assert snapshot(workdir / "out.zip", OTHER_PW) == snapshot(source)
 
 
-def test_zipcrypto_warns(cli: CliRunner, workdir: Path, secret: Path) -> None:
+@pytest.mark.usefixtures("secret")
+def test_zipcrypto_warns(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "--encryption", "zipcrypto", env=BOTH)
     assert "weak legacy cipher" in result.stderr
     quiet = rewrite(
@@ -274,23 +280,22 @@ def test_keeping_zipcrypto_does_not_warn(cli: CliRunner, workdir: Path) -> None:
 # --- reading side -------------------------------------------------------------
 
 
-def test_the_old_password_from_a_file(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_the_old_password_from_a_file(cli: CliRunner, workdir: Path) -> None:
     (workdir / "old").write_text(PASSWORD + "\n")
     result = rewrite(cli, workdir, "--old-password-file", str(workdir / "old"))
     assert result.returncode == 0, result
 
 
-def test_the_old_password_from_standard_input(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_the_old_password_from_standard_input(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "--old-password-stdin", stdin=PASSWORD + "\n")
     assert result.returncode == 0, result
 
 
+@pytest.mark.usefixtures("secret")
 def test_the_old_password_and_the_new_one_from_different_sources(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "new").write_text(OTHER + "\n")
     result = rewrite(
@@ -301,8 +306,9 @@ def test_the_old_password_and_the_new_one_from_different_sources(
     assert matches(cli, workdir / "out.zip", OTHER)
 
 
+@pytest.mark.usefixtures("secret")
 def test_both_passwords_cannot_come_from_standard_input(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = rewrite(
         cli, workdir, "--old-password-stdin", "--password-stdin", "--encryption",
@@ -314,8 +320,9 @@ def test_both_passwords_cannot_come_from_standard_input(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("secret")
 def test_the_new_password_variable_is_not_the_old_password(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = rewrite(cli, workdir, env={"ZIPLET_PASSWORD": PASSWORD})
     assert result.returncode == 1, result
@@ -323,9 +330,8 @@ def test_the_new_password_variable_is_not_the_old_password(
     assert not (workdir / "out.zip").exists()
 
 
-def test_a_wrong_old_password_writes_nothing(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_a_wrong_old_password_writes_nothing(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(
         cli,
         workdir,
@@ -339,8 +345,9 @@ def test_a_wrong_old_password_writes_nothing(
     assert leftovers(workdir) == []
 
 
+@pytest.mark.usefixtures("secret")
 def test_an_empty_old_password_on_standard_input_is_a_usage_error(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = rewrite(cli, workdir, "--old-password-stdin", stdin="")
     assert result.returncode == 2, result
@@ -350,16 +357,16 @@ def test_an_empty_old_password_on_standard_input_is_a_usage_error(
 # --- option checks ------------------------------------------------------------
 
 
-def test_password_options_need_an_encrypt(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_password_options_need_an_encrypt(cli: CliRunner, workdir: Path) -> None:
     (workdir / "new").write_text(OTHER + "\n")
     result = rewrite(cli, workdir, "--password-file", str(workdir / "new"), env=OLD)
     assert result.returncode == 2, result
     assert "--encryption" in result.stderr
 
 
-def test_an_aes_version_needs_aes(cli: CliRunner, workdir: Path, secret: Path) -> None:
+@pytest.mark.usefixtures("secret")
+def test_an_aes_version_needs_aes(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "--wz-aes-version", "1", env=OLD)
     assert result.returncode == 2, result
     result = rewrite(
@@ -368,9 +375,8 @@ def test_an_aes_version_needs_aes(cli: CliRunner, workdir: Path, secret: Path) -
     assert result.returncode == 2, result
 
 
-def test_the_spec_cannot_be_mixed_with_encrypt(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_the_spec_cannot_be_mixed_with_encrypt(cli: CliRunner, workdir: Path) -> None:
     (workdir / "spec.json").write_text('{"version": 1, "rules": []}')
     result = rewrite(
         cli, workdir, "--encryption-spec", str(workdir / "spec.json"), "--encryption",
@@ -383,8 +389,9 @@ def test_the_spec_cannot_be_mixed_with_encrypt(
 # --- per-file rules -----------------------------------------------------------
 
 
+@pytest.mark.usefixtures("secret")
 def test_protect_without_a_terminal_points_at_the_spec(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = rewrite(cli, workdir, "--protect", "docs/**", env=OLD)
     assert result.returncode == 2, result
@@ -392,8 +399,9 @@ def test_protect_without_a_terminal_points_at_the_spec(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("secret")
 def test_a_protect_rule_that_decides_nothing_is_an_error_before_any_password(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = rewrite(cli, workdir, "--protect", "typo/**")
     assert result.returncode == 2, result
@@ -430,8 +438,9 @@ def test_a_spec_protects_groups_with_their_own_passwords_and_keeps_the_rest(
     assert snapshot(out, passwords) == snapshot(secret, PW)
 
 
+@pytest.mark.usefixtures("secret")
 def test_a_spec_default_of_none_decrypts_everything_else(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "docs.pw").write_text(OTHER + "\n")
     spec = write_spec(
@@ -446,8 +455,9 @@ def test_a_spec_default_of_none_decrypts_everything_else(
     assert {v for k, v in got.items() if not k.startswith("docs/")} == {"none"}
 
 
+@pytest.mark.usefixtures("secret")
 def test_a_spec_rule_that_decides_nothing_is_an_error(
-    cli: CliRunner, workdir: Path, secret: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(workdir, [{"match": "typo/**", "method": "none"}])
     result = rewrite(cli, workdir, "--encryption-spec", str(spec), env=OLD)
@@ -456,9 +466,8 @@ def test_a_spec_rule_that_decides_nothing_is_an_error(
     assert not (workdir / "out.zip").exists()
 
 
-def test_an_invalid_spec_is_a_usage_error(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_an_invalid_spec_is_a_usage_error(cli: CliRunner, workdir: Path) -> None:
     (workdir / "spec.json").write_text("{not json")
     result = rewrite(
         cli, workdir, "--encryption-spec", str(workdir / "spec.json"), env=OLD
@@ -490,10 +499,9 @@ def _file(workdir: Path, name: str, text: str) -> Path:
     return path
 
 
+@pytest.mark.usefixtures("secret")
 @needs_pty
-def test_the_old_password_cannot_be_typed_into_a_stdin_option(
-    workdir: Path, secret: Path
-) -> None:
+def test_the_old_password_cannot_be_typed_into_a_stdin_option(workdir: Path) -> None:
     result, prompts = terminal(
         "rewrite", str(workdir / "in.zip"), str(workdir / "out.zip"),
         "--old-password-stdin",
@@ -504,10 +512,9 @@ def test_the_old_password_cannot_be_typed_into_a_stdin_option(
     assert "--password-prompt" not in result.stderr  # not an option of the old side
 
 
+@pytest.mark.usefixtures("secret")
 @needs_pty
-def test_old_passwords_are_prompted_before_new_ones(
-    workdir: Path, secret: Path
-) -> None:
+def test_old_passwords_are_prompted_before_new_ones(workdir: Path) -> None:
     result, prompts = terminal(
         "rewrite", str(workdir / "in.zip"), str(workdir / "out.zip"),
         "--encryption", "aes256",
@@ -540,8 +547,9 @@ def test_an_archive_with_two_passwords_is_read_with_two_prompts(
     assert {row[3] for row in after.values()} == {ziplet.ZIP_STORED}
 
 
+@pytest.mark.usefixtures("secret")
 @needs_pty
-def test_interrupting_leaves_nothing(workdir: Path, secret: Path) -> None:
+def test_interrupting_leaves_nothing(workdir: Path) -> None:
     result, _ = terminal(
         "rewrite",
         str(workdir / "in.zip"),
@@ -553,9 +561,10 @@ def test_interrupting_leaves_nothing(workdir: Path, secret: Path) -> None:
     assert leftovers(workdir) == []
 
 
+@pytest.mark.usefixtures("secret")
 @needs_pty
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="masking needs Python 3.14")
-def test_the_old_password_prompt_is_masked_on_3_14(workdir: Path, secret: Path) -> None:
+def test_the_old_password_prompt_is_masked_on_3_14(workdir: Path) -> None:
     result, _ = terminal(
         "rewrite", str(workdir / "in.zip"), str(workdir / "out.zip"), replies=[PASSWORD]
     )
@@ -566,9 +575,8 @@ def test_the_old_password_prompt_is_masked_on_3_14(workdir: Path, secret: Path) 
 # --- reporting ----------------------------------------------------------------
 
 
-def test_verbose_shows_what_changed_per_member(
-    cli: CliRunner, workdir: Path, secret: Path
-) -> None:
+@pytest.mark.usefixtures("secret")
+def test_verbose_shows_what_changed_per_member(cli: CliRunner, workdir: Path) -> None:
     result = rewrite(cli, workdir, "--encryption", "aes128", "-v", env=BOTH)
     assert "run.sh (store, AES-256 -> AES-128)" in result.stdout
     kept = rewrite(cli, workdir, "--force", "-v", env=OLD)

@@ -5,7 +5,7 @@ import os
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 
 import pytest
 
@@ -31,11 +31,11 @@ posix_only = pytest.mark.skipif(os.name != "posix", reason="requires POSIX")
 
 @pytest.fixture(params=["descriptor", "path_fallback"])
 def mode(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
-    if request.param == "path_fallback":
-        monkeypatch.setattr(os, "supports_dir_fd", set())
+    if cast("str", request.param) == "path_fallback":
+        monkeypatch.setattr(os, "supports_dir_fd", set[str]())
     elif os.name != "posix":
         pytest.skip("requires dir_fd support")
-    return str(request.param)
+    return cast("str", request.param)
 
 
 def _member(name: str, file_mode: int | None = None) -> ZipInfo:
@@ -79,7 +79,8 @@ def test_selects_materializer_by_entry_type() -> None:
     )
 
 
-def test_regular_file_is_written_and_reports_size(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_regular_file_is_written_and_reports_size(tmp_path: Path) -> None:
     result = _extract(tmp_path, "sub/f.txt", b"hello")
     assert (tmp_path / "sub" / "f.txt").read_bytes() == b"hello"
     assert result.bytes_written == 5
@@ -87,20 +88,23 @@ def test_regular_file_is_written_and_reports_size(mode: str, tmp_path: Path) -> 
     assert [p.name for p in (tmp_path / "sub").iterdir()] == ["f.txt"]
 
 
-def test_regular_file_overwrite_is_reported(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_regular_file_overwrite_is_reported(tmp_path: Path) -> None:
     (tmp_path / "f.txt").write_bytes(b"old")
     result = _extract(tmp_path, "f.txt", b"new")
     assert result.overwritten
     assert (tmp_path / "f.txt").read_bytes() == b"new"
 
 
-def test_regular_file_over_directory_is_refused(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_regular_file_over_directory_is_refused(tmp_path: Path) -> None:
     (tmp_path / "victim").mkdir()
     with pytest.raises(ExtractionMaterializationError, match="directory"):
         _extract(tmp_path, "victim", b"data")
     assert (tmp_path / "victim").is_dir()
 
 
+@pytest.mark.usefixtures("mode")
 @pytest.mark.parametrize(
     ("quota", "code"),
     [
@@ -112,7 +116,7 @@ def test_regular_file_over_directory_is_refused(mode: str, tmp_path: Path) -> No
     ],
 )
 def test_quota_violation_keeps_existing_file_and_leaves_no_temp(
-    mode: str, tmp_path: Path, quota: ExtractionQuota, code: str
+    tmp_path: Path, quota: ExtractionQuota, code: str
 ) -> None:
     (tmp_path / "f.txt").write_bytes(b"keep")
     with pytest.raises(ExtractionQuotaExceeded) as excinfo:
@@ -122,13 +126,15 @@ def test_quota_violation_keeps_existing_file_and_leaves_no_temp(
     assert [p.name for p in tmp_path.iterdir()] == ["f.txt"]
 
 
-def test_quota_within_limits_succeeds(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_quota_within_limits_succeeds(tmp_path: Path) -> None:
     quota = ExtractionQuota(member_limit=5, total_limit=10, total_written=5)
     _extract(tmp_path, "f.txt", b"12345", quota=quota)
     assert (tmp_path / "f.txt").read_bytes() == b"12345"
 
 
-def test_directory_created_then_reported_as_existing(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_directory_created_then_reported_as_existing(tmp_path: Path) -> None:
     first = _extract(tmp_path, "d/")
     second = _extract(tmp_path, "d/")
     assert (tmp_path / "d").is_dir()
@@ -136,40 +142,43 @@ def test_directory_created_then_reported_as_existing(mode: str, tmp_path: Path) 
     assert second.overwritten
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_directory_refuses_symlink_leaf(mode: str, tmp_path: Path) -> None:
+def test_directory_refuses_symlink_leaf(tmp_path: Path) -> None:
     (tmp_path / "elsewhere").mkdir()
     (tmp_path / "d").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
     with pytest.raises(ExtractionSecurityError):
         _extract(tmp_path, "d/")
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_symlink_is_created_without_following(mode: str, tmp_path: Path) -> None:
+def test_symlink_is_created_without_following(tmp_path: Path) -> None:
     _extract(tmp_path, "link", b"target.txt", stat.S_IFLNK | 0o777)
     assert os.readlink(tmp_path / "link") == "target.txt"
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_symlink_replaces_existing_file(mode: str, tmp_path: Path) -> None:
+def test_symlink_replaces_existing_file(tmp_path: Path) -> None:
     (tmp_path / "link").write_text("old")
     result = _extract(tmp_path, "link", b"target.txt", stat.S_IFLNK | 0o777)
     assert result.overwritten
     assert os.readlink(tmp_path / "link") == "target.txt"
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
 @pytest.mark.parametrize("link_target", [b"/etc/passwd", b"../escape", b"a/../../b"])
-def test_symlink_escaping_root_is_refused(
-    mode: str, tmp_path: Path, link_target: bytes
-) -> None:
+def test_symlink_escaping_root_is_refused(tmp_path: Path, link_target: bytes) -> None:
     with pytest.raises(ExtractionSecurityError):
         _extract(tmp_path, "link", link_target, stat.S_IFLNK | 0o777)
     assert not (tmp_path / "link").is_symlink()
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_symlink_over_directory_is_refused(mode: str, tmp_path: Path) -> None:
+def test_symlink_over_directory_is_refused(tmp_path: Path) -> None:
     (tmp_path / "link").mkdir()
     with pytest.raises(ExtractionMaterializationError):
         _extract(tmp_path, "link", b"t", stat.S_IFLNK | 0o777)
@@ -189,8 +198,9 @@ def test_unsupported_special_file_type_is_refused(tmp_path: Path) -> None:
         _extract(tmp_path, "dev", b"", stat.S_IFCHR | 0o600)
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_destination_path_may_contain_symlinks(mode: str, tmp_path: Path) -> None:
+def test_destination_path_may_contain_symlinks(tmp_path: Path) -> None:
     real = tmp_path / "real"
     real.mkdir()
     link = tmp_path / "link"
@@ -204,8 +214,9 @@ def test_destination_path_may_contain_symlinks(mode: str, tmp_path: Path) -> Non
     assert (real / "sub" / "f.txt").read_bytes() == b"data"
 
 
+@pytest.mark.usefixtures("mode")
 @posix_only
-def test_symlink_below_destination_is_refused(mode: str, tmp_path: Path) -> None:
+def test_symlink_below_destination_is_refused(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     dest = tmp_path / "dest"
@@ -221,7 +232,8 @@ def test_symlink_below_destination_is_refused(mode: str, tmp_path: Path) -> None
     assert list(outside.iterdir()) == []
 
 
-def test_target_outside_destination_is_refused(mode: str, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("mode")
+def test_target_outside_destination_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="outside the destination"):
         materialize_member(
             _member("f.txt"),

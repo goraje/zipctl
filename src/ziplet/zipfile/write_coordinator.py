@@ -25,8 +25,8 @@ class WriteCoordinator:
     """Own archive-level writer reservation and notification state."""
 
     def __init__(self, lock: threading.RLock) -> None:
-        self._condition = threading.Condition(lock)
-        self._state = WriterArchiveState.IDLE
+        self._condition: threading.Condition = threading.Condition(lock)
+        self._state: WriterArchiveState = WriterArchiveState.IDLE
         self._reservation: WriterReservation | None = None
 
     @property

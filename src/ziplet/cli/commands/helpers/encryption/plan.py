@@ -54,7 +54,7 @@ class EncryptionPlan:
     """An ordered list of :class:`Rule`; the default rule (if any) comes last."""
 
     def __init__(self, rules: Iterable[Rule] = ()) -> None:
-        self.rules = list(rules)
+        self.rules: list[Rule] = list(rules)
 
     @property
     def methods(self) -> set[EncryptionMethod]:

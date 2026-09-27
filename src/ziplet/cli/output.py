@@ -6,11 +6,13 @@ import dataclasses
 import difflib
 import json
 from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from enum import Enum
 from pathlib import PurePath
-from typing import Any, TextIO
+from typing import TextIO, cast
 
 __all__ = [
+    "JsonValue",
     "count",
     "format_table",
     "human_size",
@@ -18,6 +20,12 @@ __all__ = [
     "to_jsonable",
     "write_json",
 ]
+
+
+# Sequence and Mapping are covariant, so a ``list[str]`` is JSON data too.
+JsonValue = (
+    str | int | float | bool | None | Sequence["JsonValue"] | Mapping[str, "JsonValue"]
+)
 
 
 def _escape(char: str) -> str:
@@ -59,27 +67,31 @@ def human_size(size: int) -> str:
     return f"{value / 1024:.1f} TiB"
 
 
-def to_jsonable(value: Any) -> Any:
+def to_jsonable(value: object) -> JsonValue:
     """Convert dataclasses, enums, paths and collections to plain JSON data."""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
-            item.name: to_jsonable(getattr(value, item.name))
+            item.name: to_jsonable(getattr(value, item.name))  # pyright: ignore[reportAny]
             for item in dataclasses.fields(value)
         }
     if isinstance(value, Enum):
-        return value.value
+        return cast("JsonValue", value.value)  # Enum.value is Any in typeshed
     if isinstance(value, PurePath):
         return str(value)
     if isinstance(value, (set, frozenset)):
-        return sorted(to_jsonable(item) for item in value)
+        # only sets of names are written, and str has an order
+        return sorted(cast("AbstractSet[str]", value))
     if isinstance(value, (list, tuple)):
-        return [to_jsonable(item) for item in value]
+        return [to_jsonable(item) for item in cast("Sequence[object]", value)]
     if isinstance(value, Mapping):
-        return {str(key): to_jsonable(item) for key, item in value.items()}
-    return value
+        items = cast("Mapping[object, object]", value).items()
+        return {str(key): to_jsonable(item) for key, item in items}
+    if value is None or isinstance(value, (str, int, float)):
+        return value
+    raise TypeError(f"{type(value).__name__} is not JSON data")
 
 
-def write_json(stream: TextIO, value: Any) -> None:
+def write_json(stream: TextIO, value: object) -> None:
     """Write *value* as one ASCII-only JSON document.
 
     ASCII escapes keep the output valid whatever encoding the stream has.
@@ -103,7 +115,7 @@ def format_table(
             widths[index] = max(widths[index], len(cell))
 
     def render(cells: Sequence[str]) -> str:
-        parts = []
+        parts: list[str] = []
         last = len(cells) - 1
         for index, cell in enumerate(cells):
             if index in right_aligned:

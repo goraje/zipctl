@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from typing import Protocol
 
-__all__ = ["OutputOptions", "add_output_options"]
+__all__ = ["OutputArgs", "OutputOptions", "add_output_options"]
+
+
+class OutputArgs(Protocol):
+    """What :func:`add_output_options` leaves on the parsed arguments."""
+
+    json: bool
+    quiet: bool
+    verbose: bool
 
 
 @dataclass(frozen=True)
@@ -17,7 +26,7 @@ class OutputOptions:
     verbose: bool = False
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> OutputOptions:
+    def from_args(cls, args: OutputArgs) -> OutputOptions:
         return cls(args.json, args.quiet, args.verbose)
 
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
-from typing import TextIO
+from typing import Protocol, TextIO
 from unicodedata import east_asian_width
 
 from ziplet.cli.output import human_size, printable
@@ -15,6 +15,7 @@ from ziplet.zipfile.extract import MemberStatus
 from ziplet.zipfile.progress import ProgressCallback, ProgressEvent, ProgressPhase
 
 __all__ = [
+    "ProgressArgs",
     "ProgressRenderer",
     "StepReporter",
     "add_progress_option",
@@ -81,10 +82,10 @@ class ProgressRenderer:
         live: bool,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._stream = stream
-        self._live = live
-        self._clock = clock
-        self._drawn = 0
+        self._stream: TextIO = stream
+        self._live: bool = live
+        self._clock: Callable[[], float] = clock
+        self._drawn: int = 0
         self._last_draw: float | None = None
 
     def __call__(self, event: ProgressEvent) -> None:
@@ -138,7 +139,15 @@ class ProgressRenderer:
             self._drawn = 0
         self._last_draw = None  # what comes next is drawn at once
 
-    close = clear
+    def close(self) -> None:
+        """Same as :meth:`clear`."""
+        self.clear()
+
+
+class ProgressArgs(Protocol):
+    """What :func:`add_progress_option` leaves on the parsed arguments."""
+
+    progress: bool
 
 
 def add_progress_option(parser: argparse.ArgumentParser) -> None:
@@ -150,7 +159,7 @@ def add_progress_option(parser: argparse.ArgumentParser) -> None:
 @contextmanager
 def progress_renderer(
     stream: TextIO, enabled: bool
-) -> Iterator[ProgressRenderer | None]:
+) -> Generator[ProgressRenderer | None]:
     """The renderer for ``--progress`` (``None`` without it), closed on the way out."""
     renderer = ProgressRenderer(stream, live=stream.isatty()) if enabled else None
     try:
@@ -173,10 +182,10 @@ class StepReporter:
     def __init__(
         self, callback: ProgressCallback | None, members: Iterable[tuple[str, int]]
     ) -> None:
-        self._callback = callback
-        self._members = list(members) if callback else []
-        self._total = sum(size for _, size in self._members)
-        self._done = 0
+        self._callback: ProgressCallback | None = callback
+        self._members: list[tuple[str, int]] = list(members) if callback else []
+        self._total: int = sum(size for _, size in self._members)
+        self._done: int = 0
 
     def _event(
         self, phase: ProgressPhase, index: int, status: MemberStatus | None = None

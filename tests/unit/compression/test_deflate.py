@@ -27,7 +27,7 @@ def _decompressor() -> StreamingDecompressor:
 
 def _raw_deflate(data: bytes) -> bytes:
     if sys.version_info >= (3, 11):
-        return zlib.compress(data, wbits=-15)
+        return zlib.compress(data, wbits=-15)  # pyright: ignore[reportUnreachable]  # basedpyright assumes Python 3.10
     c = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
     return c.compress(data) + c.flush()
 

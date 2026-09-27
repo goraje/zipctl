@@ -12,12 +12,14 @@ import errno
 import os
 from pathlib import Path
 
+from typing_extensions import Self
+
 
 class SecureExtractionRoot:
     """Create extraction parents without following existing symlink components."""
 
     def __init__(self, path: Path) -> None:
-        self.path = path
+        self.path: Path = path
         self._descriptor: int | None = None
 
     @property
@@ -29,7 +31,7 @@ class SecureExtractionRoot:
             and os.open in os.supports_dir_fd
         )
 
-    def __enter__(self) -> SecureExtractionRoot:
+    def __enter__(self) -> Self:
         self.path.mkdir(parents=True, exist_ok=True)
         if self.descriptor_supported:
             self._descriptor = os.open(

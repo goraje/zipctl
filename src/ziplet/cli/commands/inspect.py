@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import argparse
 import os
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
-from ziplet.cli.commands.helpers.output_options import add_output_options
-from ziplet.cli.commands.helpers.policy_options import add_policy_options, load_policy
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
+from ziplet.cli.commands.helpers.output_options import OutputArgs, add_output_options
+from ziplet.cli.commands.helpers.policy_options import (
+    PolicyArgs,
+    add_policy_options,
+    load_policy,
+)
 from ziplet.cli.context import Context
 from ziplet.cli.errors import EXIT_FAILURE, EXIT_OK
 from ziplet.cli.output import (
@@ -22,6 +25,11 @@ from ziplet.zipfile.extract import (
     ViolationAction,
 )
 from ziplet.zipfile.inspection import InspectionResult
+
+
+class InspectArgs(OutputArgs, PolicyArgs, Protocol):
+    archive: str
+    destination: str | None
 
 
 def _section(title: str, names: tuple[str, ...], flagged: set[str]) -> list[str]:
@@ -90,7 +98,7 @@ def _render_inspection(
             ctx.out(line)
 
 
-def cmd_inspect(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_inspect(args: InspectArgs, ctx: Context) -> int:
     policy = load_policy(args, ctx)
     destination = os.path.abspath(args.destination or os.getcwd())
     with open_archive(args.archive) as zf:
@@ -118,7 +126,7 @@ def cmd_inspect(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_FAILURE if errors else EXIT_OK
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "inspect",

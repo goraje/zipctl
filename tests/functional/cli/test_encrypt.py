@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from typing_extensions import Unpack
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
@@ -23,6 +24,8 @@ from tests.functional.cli.rewrite_support import (
 from tests.functional.cli.support import (
     END_OF_INPUT,
     HAS_PTY,
+    Result,
+    RunOptions,
     write_archive,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
@@ -38,7 +41,9 @@ def source(workdir: Path) -> Path:
     return make_source(workdir / "in.zip")
 
 
-def encrypt(cli: CliRunner, workdir: Path, *args: str, **kw: object):  # type: ignore[no-untyped-def]
+def encrypt(
+    cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]
+) -> Result:
     return cli(
         "encrypt", str(workdir / "in.zip"), str(workdir / "out.zip"), *args, **kw
     )
@@ -67,9 +72,8 @@ def test_every_file_gets_the_method(
     assert not matches(cli, out, "another password") or method == "zipcrypto"
 
 
-def test_the_default_method_is_aes256(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_the_default_method_is_aes256(cli: CliRunner, workdir: Path) -> None:
     encrypt(cli, workdir, env=ENV)
     assert set(schemes(workdir / "out.zip").values()) == {"aes256"}
 
@@ -80,25 +84,24 @@ def test_the_input_is_left_alone(cli: CliRunner, workdir: Path, source: Path) ->
     assert source.read_bytes() == before
 
 
-def test_aes_version_one_can_be_asked_for(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_aes_version_one_can_be_asked_for(cli: CliRunner, workdir: Path) -> None:
     result = encrypt(cli, workdir, "--wz-aes-version", "1", env=ENV)
     assert result.returncode == 0, result
     assert set(schemes(workdir / "out.zip").values()) == {"aes256-v1"}
 
 
-def test_aes_version_two_is_the_default(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_aes_version_two_is_the_default(cli: CliRunner, workdir: Path) -> None:
     encrypt(cli, workdir, env=ENV)
     with ZipFile(workdir / "out.zip") as zf:
         versions = {i.aes_extra.wz_aes_version for i in zf.infolist() if i.is_encrypted}
     assert versions == {2}
 
 
+@pytest.mark.usefixtures("source")
 def test_an_aes_version_means_nothing_for_zipcrypto(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = encrypt(
         cli, workdir, "--encryption", "zipcrypto", "--wz-aes-version", "2", env=ENV
@@ -108,22 +111,23 @@ def test_an_aes_version_means_nothing_for_zipcrypto(
     assert not (workdir / "out.zip").exists()
 
 
-def test_none_is_not_a_method_here(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_none_is_not_a_method_here(cli: CliRunner, workdir: Path) -> None:
     result = encrypt(cli, workdir, "--encryption", "none", env=ENV)
     assert result.returncode == 2, result
 
 
+@pytest.mark.usefixtures("source")
 def test_zipcrypto_output_opens_with_the_standard_library(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     encrypt(cli, workdir, "--encryption", "zipcrypto", env=ENV)
     with zipfile.ZipFile(workdir / "out.zip") as zf:
         assert zf.read("run.sh", pwd=PW) == b"#!/bin/sh\necho hi\n"
 
 
-def test_zipcrypto_warns_but_still_works(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_zipcrypto_warns_but_still_works(cli: CliRunner, workdir: Path) -> None:
     result = encrypt(cli, workdir, "--encryption", "zipcrypto", env=ENV)
     assert result.returncode == 0, result
     assert "weak legacy cipher" in result.stderr
@@ -131,15 +135,17 @@ def test_zipcrypto_warns_but_still_works(
     assert quiet.stderr == ""
 
 
-def test_aes_does_not_warn(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_aes_does_not_warn(cli: CliRunner, workdir: Path) -> None:
     assert encrypt(cli, workdir, env=ENV).stderr == ""
 
 
 # --- password sources ---------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("source")
 def test_password_from_a_file_without_its_newline(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "pw").write_text(PASSWORD + "\n")
     result = encrypt(cli, workdir, "--password-file", str(workdir / "pw"))
@@ -147,23 +153,22 @@ def test_password_from_a_file_without_its_newline(
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
-def test_password_from_standard_input(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_password_from_standard_input(cli: CliRunner, workdir: Path) -> None:
     result = encrypt(cli, workdir, "--password-stdin", stdin=PASSWORD + "\nignored\n")
     assert result.returncode == 0, result
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
-def test_password_from_the_environment(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_password_from_the_environment(cli: CliRunner, workdir: Path) -> None:
     assert encrypt(cli, workdir, env=ENV).returncode == 0
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("source")
 def test_no_password_and_no_terminal_is_a_usage_error(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = encrypt(cli, workdir)
     assert result.returncode == 2, result
@@ -172,14 +177,16 @@ def test_no_password_and_no_terminal_is_a_usage_error(
     assert leftovers(workdir) == []
 
 
-def test_prompt_needs_a_terminal(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_prompt_needs_a_terminal(cli: CliRunner, workdir: Path) -> None:
     result = encrypt(cli, workdir, "--password-prompt", stdin="x\n")
     assert result.returncode == 2, result
     assert "--password-prompt needs a terminal" in result.stderr
 
 
+@pytest.mark.usefixtures("source")
 def test_a_password_file_wins_over_the_environment(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "pw").write_text("from the file\n")
     result = encrypt(cli, workdir, "--password-file", str(workdir / "pw"), env=ENV)
@@ -188,8 +195,9 @@ def test_a_password_file_wins_over_the_environment(
     assert not matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("source")
 def test_a_file_and_standard_input_that_differ_are_refused(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     (workdir / "pw").write_text("one password\n")
     result = encrypt(
@@ -291,7 +299,8 @@ def test_match_protects_only_the_matching_files(
     assert "2 encrypted" in result.stdout
 
 
-def test_match_may_be_repeated(cli: CliRunner, workdir: Path, source: Path) -> None:
+@pytest.mark.usefixtures("source")
+def test_match_may_be_repeated(cli: CliRunner, workdir: Path) -> None:
     encrypt(cli, workdir, "--match", "*.sh", "--match", "notes/*", env=ENV)
     got = schemes(workdir / "out.zip")
     assert {k for k, v in got.items() if v != "none"} == {
@@ -300,24 +309,23 @@ def test_match_may_be_repeated(cli: CliRunner, workdir: Path, source: Path) -> N
     }
 
 
-def test_a_star_stays_within_one_directory_level(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_a_star_stays_within_one_directory_level(cli: CliRunner, workdir: Path) -> None:
     encrypt(cli, workdir, "--match", "*.txt", env=ENV)
     got = schemes(workdir / "out.zip")
     assert {k for k, v in got.items() if v != "none"} == {"empty.txt"}
 
 
-def test_a_member_can_be_named_literally(
-    cli: CliRunner, workdir: Path, source: Path
-) -> None:
+@pytest.mark.usefixtures("source")
+def test_a_member_can_be_named_literally(cli: CliRunner, workdir: Path) -> None:
     encrypt(cli, workdir, "--match", "notes/ünïcode ✓.txt", env=ENV)
     got = schemes(workdir / "out.zip")
     assert {k for k, v in got.items() if v != "none"} == {"notes/ünïcode ✓.txt"}
 
 
+@pytest.mark.usefixtures("source")
 def test_a_pattern_that_matches_nothing_is_an_error(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = encrypt(cli, workdir, "--match", "docs/**", "--match", "typo/**", env=ENV)
     assert result.returncode == 2, result
@@ -326,8 +334,9 @@ def test_a_pattern_that_matches_nothing_is_an_error(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("source")
 def test_a_directory_name_matches_the_files_under_it(
-    cli: CliRunner, workdir: Path, source: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = encrypt(cli, workdir, "--match", "docs/", env=ENV)
     assert result.returncode == 0, result

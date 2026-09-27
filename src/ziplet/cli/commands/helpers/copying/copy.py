@@ -94,7 +94,7 @@ def _copy_compressed(
         crc, size = info.CRC, info.file_size  # not read: --verify checks them
     else:
         crc, size = _checksum(src, info, password)
-    dst._copy_raw(  # noqa: SLF001 - the library hook made for this copy
+    dst._copy_raw(  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]  # the library hook made for this copy
         src,
         info,
         new,
@@ -144,7 +144,7 @@ def _copy(
     compress_type: int | None,
     level: int | None,
 ) -> list[Copied]:
-    copied = []
+    copied: list[Copied] = []
     for info, password, target in zip(infos, passwords, targets, strict=True):
         new = ZipInfo(info.filename, info.date_time)
         new.comment = info.comment

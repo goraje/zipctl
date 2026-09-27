@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import VerifyReport, load_json
 from tests.functional.cli.support import (
     PASSWORD,
+    Result,
     data_offset,
     flip_byte,
     set_compress_type,
@@ -25,7 +26,7 @@ PW = PASSWORD.encode()
 BODY = b"integrity check payload " * 200
 
 
-def _failed(result: Any) -> list[str]:
+def _failed(result: Result) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.startswith("FAILED")]
 
 
@@ -145,13 +146,15 @@ def test_every_bad_member_is_reported_not_just_the_first(
 def test_json_report_lists_failures_with_details(cli: CliRunner, workdir: Path) -> None:
     path = write_archive(workdir / "bad.zip", [("ok.txt", BODY), ("bad.txt", BODY)])
     flip_byte(path, data_offset(path, "bad.txt") + 2)
-    document = json.loads(cli("test", "--json", str(path)).stdout)
+    document = load_json(cli("test", "--json", str(path)), VerifyReport)
     assert document["ok"] is False
     assert (document["tested"], document["failed"]) == (2, 1)
     statuses = {m["name"]: m for m in document["members"]}
     assert statuses["ok.txt"] == {"name": "ok.txt", "status": "ok", "detail": None}
     assert statuses["bad.txt"]["status"] == "failed"
-    assert "CRC" in statuses["bad.txt"]["detail"]
+    detail = statuses["bad.txt"]["detail"]
+    assert detail is not None
+    assert "CRC" in detail
 
 
 @pytest.mark.parametrize(
@@ -354,7 +357,7 @@ def test_every_encryption_scheme_verifies_with_the_right_password(
     cli: CliRunner,
     workdir: Path,
     encryption: str,
-    extra: Any,
+    extra: ziplet.ZipFileExtra | None,
     compression: int,
 ) -> None:
     path = write_archive(
@@ -372,7 +375,7 @@ def test_every_encryption_scheme_verifies_with_the_right_password(
 
 @pytest.mark.parametrize(("encryption", "extra"), ENCRYPTED_FLAVOURS)
 def test_tampered_encrypted_data_is_detected(
-    cli: CliRunner, workdir: Path, encryption: str, extra: Any
+    cli: CliRunner, workdir: Path, encryption: str, extra: ziplet.ZipFileExtra | None
 ) -> None:
     path = write_archive(
         workdir / "e.zip",

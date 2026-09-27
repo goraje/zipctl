@@ -14,7 +14,7 @@ from ziplet.cli.errors import CliError
 
 
 def _raising(error: BaseException) -> Callable[[argparse.Namespace, Context], int]:
-    def handler(args: argparse.Namespace, ctx: Context) -> int:
+    def handler(_args: argparse.Namespace, _ctx: Context) -> int:
         raise error
 
     return handler

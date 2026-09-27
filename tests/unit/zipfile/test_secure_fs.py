@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -10,15 +11,19 @@ from ziplet.zipfile.secure_fs import SecureExtractionRoot
 posix_only = pytest.mark.skipif(os.name != "posix", reason="requires dir_fd support")
 
 
+def _without_descriptors(_self: SecureExtractionRoot) -> bool:
+    return False
+
+
 @pytest.fixture(params=["descriptor", "path_fallback"])
 def root(
     request: pytest.FixtureRequest,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> SecureExtractionRoot:
-    if request.param == "path_fallback":
+    if cast("str", request.param) == "path_fallback":
         monkeypatch.setattr(
-            SecureExtractionRoot, "descriptor_supported", property(lambda self: False)
+            SecureExtractionRoot, "descriptor_supported", property(_without_descriptors)
         )
     elif os.name != "posix":
         pytest.skip("requires dir_fd support")

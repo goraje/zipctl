@@ -9,6 +9,9 @@ entries.
 Adapted from CPython's ``zipfile._path`` package.
 """
 
+# Friend access inside the zipfile package (ruff exempts it via SLF001).
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 import contextlib
@@ -18,7 +21,9 @@ import pathlib
 import posixpath
 import re
 from collections.abc import Iterable, Iterator
-from typing import IO, Any, cast
+from typing import IO, Literal, cast, overload
+
+from typing_extensions import override
 
 from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
@@ -104,6 +109,7 @@ class CompleteDirs(ZipFile):
         as_dirs = (p + posixpath.sep for p in parents)
         return _dedupe(_difference(as_dirs, names))
 
+    @override
     def namelist(self) -> list[str]:
         """Return archive member names, including synthesized implied dirs."""
         names = super().namelist()
@@ -119,6 +125,7 @@ class CompleteDirs(ZipFile):
         dir_match = name not in names and dirname in names
         return dirname if dir_match else name
 
+    @override
     def getinfo(self, name: str) -> ZipInfo:
         """Return :class:`ZipInfo` for *name*, synthesizing implied dirs."""
         try:
@@ -169,15 +176,18 @@ class FastLookup(CompleteDirs):
     change out from under the cache.
     """
 
-    __names: list[str]
-    __lookup: set[str]
+    # Filled on first use; a missing attribute means "not cached yet".
+    __names: list[str]  # pyright: ignore[reportUninitializedInstanceVariable]
+    __lookup: set[str]  # pyright: ignore[reportUninitializedInstanceVariable]
 
+    @override
     def namelist(self) -> list[str]:
         with contextlib.suppress(AttributeError):
             return self.__names
         self.__names = super().namelist()
         return self.__names
 
+    @override
     def _name_set(self) -> set[str]:
         with contextlib.suppress(AttributeError):
             return self.__lookup
@@ -283,6 +293,7 @@ class Path:
         self.root = FastLookup.make(root)
         self.at = at
 
+    @override
     def __eq__(self, other: object) -> bool:
         """Return whether *other* is a :class:`Path` for the same root and location."""
         if self.__class__ is not other.__class__:
@@ -290,26 +301,52 @@ class Path:
         assert isinstance(other, Path)
         return (self.root, self.at) == (other.root, other.at)
 
+    @override
     def __hash__(self) -> int:
         """Return a hash consistent with :meth:`__eq__`."""
         return hash((self.root, self.at))
 
+    @overload
+    def open(
+        self,
+        mode: Literal["r", "w"] = "r",
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool = False,
+        write_through: bool = False,
+        *,
+        pwd: bytes | None = None,
+    ) -> io.TextIOWrapper: ...
+
+    @overload
+    def open(
+        self, mode: Literal["rb", "wb"], *, pwd: bytes | None = None
+    ) -> IO[bytes]: ...
+
     def open(
         self,
         mode: str = "r",
-        *args: Any,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool = False,
+        write_through: bool = False,
+        *,
         pwd: bytes | None = None,
-        **kwargs: Any,
-    ) -> IO[Any]:
+    ) -> io.TextIOWrapper | IO[bytes]:
         """Open this entry for reading or writing.
 
-        Follows the semantics of :meth:`pathlib.Path.open`: text mode
+        Follows the semantics of :meth:`pathlib.Path.open`: the text mode
         arguments are passed through to :class:`io.TextIOWrapper`.
 
         Args:
-            mode: Any of ``'r'``, ``'rb'``, ``'w'``, ``'wb'`` (text modes
-                imply UTF-8-compatible decoding via
-                :func:`io.text_encoding` unless *args*/*kwargs* override it).
+            mode: Any of ``'r'``, ``'rb'``, ``'w'``, ``'wb'``.
+            encoding: Text encoding; only valid in text mode.
+            errors: Text error handling; only valid in text mode.
+            newline: Text newline handling; only valid in text mode.
+            line_buffering: Flush on newline; only valid in text mode.
+            write_through: Write straight through; only valid in text mode.
             pwd: Decryption password for reading an encrypted member. Falls
                 back to the archive's default password (set via
                 :meth:`~ziplet.zipfile.file.ZipFile.setpassword`) when
@@ -327,11 +364,13 @@ class Path:
             raise FileNotFoundError(self)
         stream = self.root.open(self.at, zip_mode, pwd)
         if "b" in mode:
-            if args or kwargs:
+            text_args = (encoding, errors, newline, line_buffering, write_through)
+            if text_args != (None, None, None, False, False):
                 raise ValueError("encoding args invalid for binary operation")
             return stream
-        encoding, args, kwargs = _extract_text_encoding(*args, **kwargs)
-        return io.TextIOWrapper(stream, encoding, *args, **kwargs)
+        return io.TextIOWrapper(
+            stream, encoding, errors, newline, line_buffering, write_through
+        )
 
     def _base(self) -> pathlib.PurePosixPath | pathlib.Path:
         return pathlib.PurePosixPath(self.at) if self.at else self.filename
@@ -368,16 +407,24 @@ class Path:
             raise TypeError("root.filename is not set")
         return pathlib.Path(self.root.filename).joinpath(self.at)
 
-    def read_text(self, *args: Any, **kwargs: Any) -> str:
+    def read_text(
+        self,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+        line_buffering: bool = False,
+        write_through: bool = False,
+    ) -> str:
         """Return this member's contents decoded as text."""
-        encoding, args, kwargs = _extract_text_encoding(*args, **kwargs)
-        with self.open("r", encoding, *args, **kwargs) as strm:
-            return cast(str, strm.read())
+        with self.open(
+            "r", encoding, errors, newline, line_buffering, write_through
+        ) as strm:
+            return strm.read()
 
     def read_bytes(self) -> bytes:
         """Return this member's raw, decompressed contents."""
         with self.open("rb") as strm:
-            return cast(bytes, strm.read())
+            return strm.read()
 
     def _is_child(self, path: Path) -> bool:
         return posixpath.dirname(path.at.rstrip("/")) == self.at.rstrip("/")
@@ -441,10 +488,12 @@ class Path:
         """Return this path's location relative to *other*."""
         return posixpath.relpath(str(self), str(other.joinpath(*extra)))
 
+    @override
     def __str__(self) -> str:
         """Return the archive filename joined with this path."""
         return posixpath.join(str(self.root.filename), self.at)
 
+    @override
     def __repr__(self) -> str:
         """Return an unambiguous representation showing the archive and location."""
         return f"{self.__class__.__name__}({self.root.filename!r}, {self.at!r})"
@@ -454,20 +503,16 @@ class Path:
         next_at = posixpath.join(self.at, *other)
         return self._next(self.root.resolve_dir(next_at))
 
-    __truediv__ = joinpath
+    def __truediv__(self, other: str) -> Path:
+        return self.joinpath(other)
 
     @property
     def parent(self) -> Path:
         """Return the containing directory."""
         if not self.at:
-            return cast(Path, self.filename.parent)
+            # At the root this is the archive's own pathlib parent, as in zipfile.Path.
+            return cast(Path, self.filename.parent)  # pyright: ignore[reportInvalidCast]
         parent_at = posixpath.dirname(self.at.rstrip("/"))
         if parent_at:
             parent_at += "/"
         return self._next(parent_at)
-
-
-def _extract_text_encoding(
-    encoding: str | None = None, *args: Any, **kwargs: Any
-) -> tuple[str | None, tuple[Any, ...], dict[str, Any]]:
-    return encoding, args, kwargs

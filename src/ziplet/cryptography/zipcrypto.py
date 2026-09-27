@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from typing_extensions import override
+
 from ziplet.cryptography.base import BaseZipDecrypter, BaseZipEncryptor
 from ziplet.exceptions import BadPassword, BadZipFile
 from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
@@ -53,9 +55,9 @@ class _ZipCryptoState:
     """Shared ZipCrypto key schedule used by encryption and decryption."""
 
     def __init__(self, password: bytes) -> None:
-        self.key0 = 305419896
-        self.key1 = 591751049
-        self.key2 = 878082192
+        self.key0: int = 305419896
+        self.key1: int = 591751049
+        self.key2: int = 878082192
         for value in password:
             self.update_keys(value)
 
@@ -112,8 +114,8 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
         encryption_header_length (int): Always 12 bytes.
     """
 
-    encryption_header_length = 12
-    authentication_trailer_length = 0
+    encryption_header_length: int = 12
+    authentication_trailer_length: int = 0
 
     def __init__(self, zinfo: ZipInfo, pwd: bytes, encryption_header: bytes) -> None:
         """Initialise the decrypter for a ZIP entry.
@@ -130,8 +132,8 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
         """
         if len(encryption_header) != self.encryption_header_length:
             raise BadZipFile("Truncated ZipCrypto encryption header")
-        self.filename = zinfo.filename
-        self._state = _ZipCryptoState(pwd)
+        self.filename: str = zinfo.filename
+        self._state: _ZipCryptoState = _ZipCryptoState(pwd)
 
         # The first 12 bytes in the cypher stream is an encryption header
         # used to strengthen the algorithm. The first 11 bytes are completely
@@ -149,11 +151,13 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
             raise BadPassword("Bad password for file %r" % zinfo.filename)
 
     @classmethod
+    @override
     def header_length(cls, zinfo: ZipInfo) -> int:
         """Return the encryption header length. Always 12 bytes for ZipCrypto."""
         del zinfo
         return cls.encryption_header_length
 
+    @override
     def decrypt(self, data: bytes) -> bytes:
         """Decrypt a chunk of ciphertext.
 
@@ -180,10 +184,11 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
         Args:
             pwd (bytes): Encryption password as raw bytes.
         """
-        self._state = _ZipCryptoState(pwd)
+        self._state: _ZipCryptoState = _ZipCryptoState(pwd)
 
         self._zinfo: ZipInfo | None = None
 
+    @override
     def update_zipinfo(self, zipinfo: ZipInfo) -> None:
         """Set the data-descriptor flag and store the ZipInfo reference.
 
@@ -199,6 +204,7 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
         zipinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
         self._zinfo = zipinfo
 
+    @override
     def encryption_header(self) -> bytes:
         """Build the 12-byte ZipCrypto encryption header.
 
@@ -221,6 +227,7 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
         header = os.urandom(11) + bytes([check_byte])
         return self.encrypt(header)
 
+    @override
     def encrypt(self, data: bytes) -> bytes:
         """Encrypt a chunk of plaintext.
 
@@ -232,6 +239,7 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
         """
         return self._state.encrypt(data)
 
+    @override
     def flush(self) -> bytes:
         """Finalise encryption.
 

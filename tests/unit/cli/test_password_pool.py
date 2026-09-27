@@ -3,26 +3,32 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 from tests.unit.cli.conftest import new_context
 from ziplet.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
 from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.password import PasswordStatus
+from ziplet.zipfile.password import (
+    MemberPasswordCheck,
+    PasswordCheckResult,
+    PasswordStatus,
+)
 
 
 class FakeZip:
     """Accepts the password each member was set up with."""
 
     def __init__(
-        self, secrets: dict[str, bytes], corrupt: frozenset[str] = frozenset()
+        self, secrets: dict[str, bytes], corrupt: frozenset[str] | None = None
     ) -> None:
-        self.secrets = secrets
-        self.corrupt = corrupt
+        self.secrets: dict[str, bytes] = secrets
+        self.corrupt: frozenset[str] = corrupt or frozenset()
         self.checked: list[bytes] = []
 
-    def check_password(self, password: bytes, members: list[Any]) -> Any:
+    def check_password(
+        self, password: bytes, members: list[ZipInfo]
+    ) -> PasswordCheckResult:
         name = members[0].filename
         self.checked.append(password)
         if name in self.corrupt:
@@ -31,7 +37,7 @@ class FakeZip:
             status = PasswordStatus.ACCEPTED
         else:
             status = PasswordStatus.REJECTED
-        return SimpleNamespace(members=[SimpleNamespace(status=status)])
+        return PasswordCheckResult((MemberPasswordCheck(name, status),))
 
 
 class Typing:
@@ -41,7 +47,7 @@ class Typing:
     """
 
     def __init__(self, *answers: str | None) -> None:
-        self._answers = list(answers)
+        self._answers: list[str | None] = list(answers)
         self.asked: list[str] = []
 
     def __call__(self, label: str) -> str:
@@ -51,8 +57,8 @@ class Typing:
 
 
 def resolve(pool: PasswordPool, zf: FakeZip, name: str) -> bytes | PasswordProblem:
-    info = cast("ZipInfo", SimpleNamespace(filename=name))
-    return pool.resolve(cast("ZipFile", zf), info)
+    info = cast("ZipInfo", SimpleNamespace(filename=name))  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
+    return pool.resolve(cast("ZipFile", zf), info)  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
 
 
 def pool(*known: bytes, prompt: Typing | None = None) -> PasswordPool:

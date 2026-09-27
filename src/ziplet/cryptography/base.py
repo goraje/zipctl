@@ -21,7 +21,7 @@ __all__ = [
 ]
 
 
-class _ReadableStream(Protocol):
+class ReadableStream(Protocol):
     """The minimal stream interface :meth:`BaseZipDecrypter.finalize` needs."""
 
     def read(self, n: int = -1, /) -> bytes: ...
@@ -72,7 +72,7 @@ class BaseZipDecrypter(ABC):
         self,
         expected_crc: int | None,
         running_crc: int | None,
-        fileobj: _ReadableStream,
+        fileobj: ReadableStream,
     ) -> None:
         """Verify integrity once the entry has been fully read.
 
@@ -84,7 +84,7 @@ class BaseZipDecrypter(ABC):
                 or ``None`` if unavailable.
             running_crc (int | None): The CRC-32 accumulated while reading,
                 or ``None`` before EOF is reached.
-            fileobj (_ReadableStream): The underlying stream, positioned
+            fileobj (ReadableStream): The underlying stream, positioned
                 right after the ciphertext, for reading any trailing
                 authentication bytes.
 

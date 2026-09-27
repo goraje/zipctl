@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from dataclasses import dataclass
+from typing import Protocol
 
-from ziplet.cli.commands.helpers.command import add_command, add_subcommands
-from ziplet.cli.commands.helpers.output_options import add_output_options
+from ziplet.cli.commands.helpers.command import Subparsers, add_command, add_subcommands
+from ziplet.cli.commands.helpers.output_options import OutputArgs, add_output_options
 from ziplet.cli.commands.helpers.policy_options import (
+    PolicyArgs,
     add_policy_options,
     load_policy,
 )
@@ -25,16 +26,29 @@ from ziplet.zipfile.policy_config import (
 )
 
 
-def cmd_policy_show(args: argparse.Namespace, ctx: Context) -> int:
+class ValidateArgs(OutputArgs, Protocol):
+    files: list[str]
+
+
+@dataclass(frozen=True)
+class _FileReport:
+    """One policy file as ``policy validate --json`` reports it."""
+
+    file: str
+    valid: bool
+    issues: list[dict[str, str]]
+
+
+def cmd_policy_show(args: PolicyArgs, ctx: Context) -> int:
     policy: ExtractPolicy = load_policy(args, ctx)
     ctx.out(policy_to_json(policy))
     return EXIT_OK
 
 
-def cmd_policy_validate(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_policy_validate(args: ValidateArgs, ctx: Context) -> int:
     if args.files.count("-") > 1:
         raise UsageError("standard input can only be given once")
-    reports: list[dict[str, Any]] = []
+    reports: list[_FileReport] = []
     for source in args.files:
         issues: list[dict[str, str]] = []
         try:
@@ -45,19 +59,19 @@ def cmd_policy_validate(args: argparse.Namespace, ctx: Context) -> int:
             ]
         except CliError as exc:  # unreadable file: report it and check the others
             issues = [{"path": "", "message": exc.message}]
-        reports.append({"file": source, "valid": not issues, "issues": issues})
+        reports.append(_FileReport(source, not issues, issues))
 
-    invalid = [report for report in reports if not report["valid"]]
+    invalid = [report for report in reports if not report.valid]
     if args.json:
         write_json(ctx.stdout, {"ok": not invalid, "files": reports})
     else:
         for report in reports:
-            name = printable(report["file"])
-            if report["valid"]:
+            name = printable(report.file)
+            if report.valid:
                 ctx.out(f"{'OK':<8}{name}")
                 continue
-            ctx.out(f"{'FAILED':<8}{name}: {count(len(report['issues']), 'issue')}")
-            for issue in report["issues"]:
+            ctx.out(f"{'FAILED':<8}{name}: {count(len(report.issues), 'issue')}")
+            for issue in report.issues:
                 where = issue["path"] or "<policy>"
                 ctx.out(f"  {printable(where)}: {printable(issue['message'])}")
         ctx.out()
@@ -66,7 +80,7 @@ def cmd_policy_validate(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_USAGE if invalid else EXIT_OK
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers, "policy", None, "show or validate extraction policies"
     )

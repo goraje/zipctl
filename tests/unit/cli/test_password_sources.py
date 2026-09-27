@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from typing_extensions import override
 
 from tests.unit.cli.test_password_pool import FakeZip
 from ziplet.cli.commands.helpers.passwords.options import (
+    OldPasswordArgs,
+    PasswordArgs,
     PasswordOptions,
     add_old_password_options,
     add_password_options,
@@ -34,6 +37,7 @@ from ziplet.zipfile.info import ZipInfo
 
 
 class _Terminal(io.StringIO):
+    @override
     def isatty(self) -> bool:
         return True
 
@@ -212,14 +216,24 @@ def test_prompt_option_needs_a_terminal() -> None:
 # -- the options and the one password they name ------------------------------
 
 
-def test_options_are_read_from_parsed_arguments(tmp_path: Path) -> None:
+def _password_args(args: argparse.Namespace) -> PasswordArgs:
+    return cast("PasswordArgs", args)  # pyright: ignore[reportInvalidCast]  # Namespace has the attributes the Protocol names
+
+
+def _old_password_args(args: argparse.Namespace) -> OldPasswordArgs:
+    return cast("OldPasswordArgs", args)  # pyright: ignore[reportInvalidCast]  # Namespace has the attributes the Protocol names
+
+
+def test_options_are_read_from_parsed_arguments() -> None:
     parser = argparse.ArgumentParser()
     add_password_options(parser)
     args = parser.parse_args(["--password-file", "f", "--password-stdin"])
-    assert PasswordOptions.from_args(args) == PasswordOptions("f", True, False)
-    assert PasswordOptions.from_args(parser.parse_args([])) == PasswordOptions(
-        None, False, False
+    assert PasswordOptions.from_args(_password_args(args)) == PasswordOptions(
+        "f", True, False
     )
+    assert PasswordOptions.from_args(
+        _password_args(parser.parse_args([]))
+    ) == PasswordOptions(None, False, False)
 
 
 def test_old_password_options_feed_the_old_pool(tmp_path: Path) -> None:
@@ -228,9 +242,9 @@ def test_old_password_options_feed_the_old_pool(tmp_path: Path) -> None:
     path = _password_file(tmp_path, b"old one\n")
     args = parser.parse_args(["--old-password-file", path])
     ctx = _ctx(env={ENV_VAR: "new", OLD_ENV_VAR: "ignored"})
-    pool = old_password_pool(args, ctx)
+    pool = old_password_pool(_old_password_args(args), ctx)
     zf = FakeZip({"a": b"old one"})
-    assert pool.resolve(cast(ZipFile, zf), _member("a")) == b"old one"
+    assert pool.resolve(cast(ZipFile, zf), _member("a"))  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in == b"old one"
     assert zf.checked == [b"old one"]
 
 

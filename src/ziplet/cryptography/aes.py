@@ -4,6 +4,9 @@ Implements the WinZip AES encryption specification using PBKDF2 key derivation,
 AES in CTR mode with a little-endian counter, and HMAC-SHA1 authentication.
 """
 
+# Import cycle through zipfile.info, which base.py imports to annotate ZipInfo.
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import hmac as stdlib_hmac
@@ -15,10 +18,16 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from cryptography.hazmat.primitives import hashes, hmac
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers import (
+    Cipher,
+    CipherContext,
+    algorithms,
+    modes,
+)
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from typing_extensions import override
 
-from ziplet.cryptography.base import BaseZipDecrypter, BaseZipEncryptor, _ReadableStream
+from ziplet.cryptography.base import BaseZipDecrypter, BaseZipEncryptor, ReadableStream
 from ziplet.exceptions import BadPassword, BadZipFile
 
 if TYPE_CHECKING:
@@ -91,9 +100,9 @@ class AesKeyCache:
     """
 
     def __init__(self, maxsize: int = 128) -> None:
-        self._maxsize = maxsize
+        self._maxsize: int = maxsize
         self._entries: OrderedDict[tuple[bytes, bytes, int], bytes] = OrderedDict()
-        self._lock = threading.Lock()
+        self._lock: threading.Lock = threading.Lock()
 
     def get(self, pwd: bytes, salt: bytes, length: int) -> bytes | None:
         """The key material derived for these inputs, if it is cached."""
@@ -162,9 +171,11 @@ class _AesCtrWithLittleEndian:
             key (bytes): AES encryption key. Must be 16, 24, or 32 bytes
                 (128, 192, or 256 bits).
         """
-        self.counter = 1
-        self.keystream_buffer = b""
-        self._encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+        self.counter: int = 1
+        self.keystream_buffer: bytes = b""
+        self._encryptor: CipherContext = Cipher(
+            algorithms.AES(key), modes.ECB()
+        ).encryptor()
 
     def encrypt(self, data: bytes) -> bytes:
         """Encrypt data using AES-CTR with a little-endian counter.
@@ -238,8 +249,8 @@ class AesZipDecrypter(BaseZipDecrypter):
             BadPassword: If *pwd* does not match the password-verification
                 bytes in *encryption_header*.
         """
-        self.filename = zinfo.filename
-        self._wz_aes_version = zinfo.aes_extra.wz_aes_version
+        self.filename: str = zinfo.filename
+        self._wz_aes_version: int | None = zinfo.aes_extra.wz_aes_version
 
         if isinstance(pwd, str):
             pwd = pwd.encode("utf-8")
@@ -277,8 +288,10 @@ class AesZipDecrypter(BaseZipDecrypter):
         if key_cache is not None:
             key_cache.put(pwd, salt, dk_len, keymaterial)
 
-        self.decrypter = _AesCtrWithLittleEndian(keymaterial[:key_length])
-        self.hmac = hmac.HMAC(
+        self.decrypter: _AesCtrWithLittleEndian = _AesCtrWithLittleEndian(
+            keymaterial[:key_length]
+        )
+        self.hmac: hmac.HMAC = hmac.HMAC(
             keymaterial[key_length : 2 * key_length],
             hashes.SHA1(),
         )
@@ -306,6 +319,7 @@ class AesZipDecrypter(BaseZipDecrypter):
             raise BadZipFile("Invalid AES strength") from None
 
     @classmethod
+    @override
     def header_length(cls, zinfo: ZipInfo) -> int:
         """Return the encryption header length for an entry.
 
@@ -313,6 +327,7 @@ class AesZipDecrypter(BaseZipDecrypter):
         """
         return cls.encryption_header_length(zinfo)
 
+    @override
     def decrypt(self, data: bytes) -> bytes:
         """Decrypt a chunk of ciphertext and update the running HMAC.
 
@@ -343,11 +358,12 @@ class AesZipDecrypter(BaseZipDecrypter):
         ):
             raise BadZipFile("Bad HMAC check for file %r" % self.filename)
 
+    @override
     def finalize(
         self,
         expected_crc: int | None,
         running_crc: int | None,
-        fileobj: _ReadableStream,
+        fileobj: ReadableStream,
     ) -> None:
         """Verify the HMAC tag, and for WZ-AES V1 also the CRC-32.
 
@@ -412,12 +428,12 @@ class AesZipEncryptor(BaseZipEncryptor):
         if force_wz_aes_version not in (None, WZ_AES_V1, WZ_AES_V2):
             raise ValueError("force_wz_aes_version must be 1 or 2")
 
-        self.force_wz_aes_version = force_wz_aes_version
-        self.aes_strength = _NBITS_TO_STRENGTH[nbits]
-        self.salt_length = _WZ_SALT_LENGTHS[self.aes_strength]
+        self.force_wz_aes_version: int | None = force_wz_aes_version
+        self.aes_strength: int = _NBITS_TO_STRENGTH[nbits]
+        self.salt_length: int = _WZ_SALT_LENGTHS[self.aes_strength]
         key_length = _WZ_KEY_LENGTHS[self.aes_strength]
 
-        self.salt = os.urandom(self.salt_length)
+        self.salt: bytes = os.urandom(self.salt_length)
         dk_len = 2 * key_length + _PWD_VERIFY_LENGTH
 
         kdf = PBKDF2HMAC(
@@ -428,13 +444,16 @@ class AesZipEncryptor(BaseZipEncryptor):
         )
         keymaterial = kdf.derive(pwd)
 
-        self.encpwdverify = keymaterial[2 * key_length :]
-        self.encryptor = _AesCtrWithLittleEndian(keymaterial[:key_length])
-        self.hmac = hmac.HMAC(
+        self.encpwdverify: bytes = keymaterial[2 * key_length :]
+        self.encryptor: _AesCtrWithLittleEndian = _AesCtrWithLittleEndian(
+            keymaterial[:key_length]
+        )
+        self.hmac: hmac.HMAC = hmac.HMAC(
             keymaterial[key_length : 2 * key_length],
             hashes.SHA1(),
         )
 
+    @override
     def update_zipinfo(self, zipinfo: ZipInfo) -> None:
         """Write AES-related fields into a ZipInfo extra-data structure.
 
@@ -446,6 +465,7 @@ class AesZipEncryptor(BaseZipEncryptor):
         if self.force_wz_aes_version is not None:
             zipinfo.aes_extra.wz_aes_version = self.force_wz_aes_version
 
+    @override
     def encryption_header(self) -> bytes:
         """Build the encryption header to prepend to the ciphertext.
 
@@ -455,6 +475,7 @@ class AesZipEncryptor(BaseZipEncryptor):
         """
         return self.salt + self.encpwdverify
 
+    @override
     def encrypt(self, data: bytes) -> bytes:
         """Encrypt a chunk of plaintext and update the running HMAC.
 
@@ -468,6 +489,7 @@ class AesZipEncryptor(BaseZipEncryptor):
         self.hmac.update(data)
         return data
 
+    @override
     def flush(self) -> bytes:
         """Finalise encryption and return the HMAC authentication tag.
 

@@ -8,7 +8,9 @@ import time
 import warnings
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import ClassVar, Protocol, cast
+
+from typing_extensions import override
 
 from ziplet.compression import (
     ZIP_BZIP2,
@@ -47,6 +49,17 @@ from ziplet.zipfile.shared import (
     ZIP64_LIMIT,
     ZIP64_VERSION,
 )
+
+
+class _ArchiveDefaults(Protocol):
+    """The ``ZipFile`` settings that ``ZipInfo._for_archive`` copies."""
+
+    @property
+    def compression(self) -> int: ...
+
+    @property
+    def compresslevel(self) -> int | None: ...
+
 
 # ---------------------------------------------------------------------------
 # AES extra-field dataclass
@@ -122,7 +135,7 @@ class _Extra:
         id: The 2-byte field tag, or ``None`` if the header was malformed.
     """
 
-    FIELD_STRUCT = struct.Struct("<HH")
+    FIELD_STRUCT: ClassVar[struct.Struct] = struct.Struct("<HH")
 
     def __init__(self, data: bytes | memoryview, field_id: int | None = None) -> None:
         """Initialize an extra field record.
@@ -147,7 +160,7 @@ class _Extra:
             unconsumed bytes after the field.
         """
         try:
-            xid, xlen = cls.FIELD_STRUCT.unpack(raw[:4])
+            xid, xlen = cast("tuple[int, int]", cls.FIELD_STRUCT.unpack(raw[:4]))
         except struct.error:
             xid = None
             xlen = 0
@@ -170,7 +183,7 @@ class _Extra:
         while rest:
             if len(rest) < 4:
                 raise BadZipFile("Corrupt extra field header")
-            _, field_length = cls.FIELD_STRUCT.unpack(rest[:4])
+            _, field_length = cast("tuple[int, int]", cls.FIELD_STRUCT.unpack(rest[:4]))
             if len(rest) < 4 + field_length:
                 raise BadZipFile("Corrupt extra field data")
             extra, rest = cls.read_one(rest)
@@ -222,13 +235,12 @@ class ZipInfo:
     """
 
     # Annotate slots that are set externally (by ZipFile) rather than in __init__
-    CRC: int
-    header_offset: int
-    raw_time: int
+    CRC: int  # pyright: ignore[reportUninitializedInstanceVariable]  # set by ZipFile
+    header_offset: int  # pyright: ignore[reportUninitializedInstanceVariable]  # set by ZipFile
+    raw_time: int  # pyright: ignore[reportUninitializedInstanceVariable]  # set by ZipFile
     _end_offset: int | None
-    aes_extra: WzAesExtra
 
-    __slots__ = (
+    __slots__: tuple[str, ...] = (
         "orig_filename",
         "filename",
         "date_time",
@@ -272,14 +284,16 @@ class ZipInfo:
         Raises:
             ValueError: If ``date_time[0]`` is earlier than 1980.
         """
-        self.orig_filename = filename  # Original file name in archive
+        self.orig_filename: str = filename  # Original file name in archive
 
         # Terminate the file name at the first null byte and
         # ensure paths always use forward slashes as the directory separator.
         filename = _sanitize_filename(filename)
 
-        self.filename = filename  # Normalized file name
-        self.date_time = date_time  # year, month, day, hour, min, sec
+        self.filename: str = filename  # Normalized file name
+        self.date_time: tuple[int, int, int, int, int, int] = (
+            date_time  # year, month, day, hour, min, sec
+        )
 
         if date_time[0] < 1980:
             raise ValueError("ZIP does not support timestamps before 1980")
@@ -287,21 +301,19 @@ class ZipInfo:
         # Standard values:
         self.compress_type: int = ZIP_STORED  # Type of compression for the file
         self.compress_level: int | None = None  # Level for the compressor
-        self.comment = b""  # Comment for each file
-        self.extra = b""  # ZIP extra data
-        if sys.platform == "win32":
-            self.create_system = 0  # System which created ZIP archive
-        else:
-            self.create_system = 3  # System which created ZIP archive
-        self.create_version = DEFAULT_VERSION  # Version which created ZIP archive
-        self.extract_version = DEFAULT_VERSION  # Version needed to extract archive
-        self.reserved = 0  # Must be zero
-        self.flag_bits = 0  # ZIP flag bits
-        self.volume = 0  # Volume number of file header
-        self.internal_attr = 0  # Internal attributes
-        self.external_attr = 0  # External file attributes
-        self.compress_size = 0  # Size of the compressed file
-        self.file_size = 0  # Size of the uncompressed file
+        self.comment: bytes = b""  # Comment for each file
+        self.extra: bytes = b""  # ZIP extra data
+        # System which created ZIP archive
+        self.create_system: int = 0 if sys.platform == "win32" else 3
+        self.create_version: int = DEFAULT_VERSION  # Version which created ZIP archive
+        self.extract_version: int = DEFAULT_VERSION  # Version needed to extract archive
+        self.reserved: int = 0  # Must be zero
+        self.flag_bits: int = 0  # ZIP flag bits
+        self.volume: int = 0  # Volume number of file header
+        self.internal_attr: int = 0  # Internal attributes
+        self.external_attr: int = 0  # External file attributes
+        self.compress_size: int = 0  # Size of the compressed file
+        self.file_size: int = 0  # Size of the uncompressed file
         self._end_offset = None  # Start of the next local header or central directory
         # Other attributes are set by class ZipFile:
         # header_offset         Byte offset to the file header
@@ -322,6 +334,7 @@ class ZipInfo:
     def _compresslevel(self, value: int | None) -> None:
         self.compress_level = value
 
+    @override
     def __repr__(self) -> str:
         """Return a human-readable representation of the entry.
 
@@ -526,7 +539,7 @@ class ZipInfo:
             value exceeds ``ZIP64_LIMIT``, and ``min_version`` is
             ``ZIP64_VERSION`` when any ZIP64 field is emitted.
         """
-        zip64_fields = []
+        zip64_fields: list[int] = []
         if self.file_size > ZIP64_LIMIT:
             zip64_fields.append(self.file_size)
             file_size = 0xFFFFFFFF
@@ -811,9 +824,9 @@ class ZipInfo:
         dostime = self.get_dostime()
         if self.use_data_descriptor:
             # Set these to zero because we write them after the file data
-            CRC = compress_size = file_size = 0
+            crc = compress_size = file_size = 0
         else:
-            CRC = self.CRC
+            crc = self.CRC
             compress_size = self.compress_size
             file_size = self.file_size
 
@@ -835,7 +848,7 @@ class ZipInfo:
             compress_type=self.compress_type,
             dostime=dostime,
             dosdate=dosdate,
-            crc=CRC,
+            crc=crc,
             compress_size=compress_size,
             file_size=file_size,
             extra=extra,
@@ -1051,7 +1064,7 @@ class ZipInfo:
 
         return zinfo
 
-    def _for_archive(self, archive: Any) -> ZipInfo:
+    def _for_archive(self, archive: _ArchiveDefaults) -> ZipInfo:
         """Populate defaults from *archive* for use with ``ZipFile.writestr``.
 
         Sets ``date_time`` from the current time (or ``SOURCE_DATE_EPOCH`` when

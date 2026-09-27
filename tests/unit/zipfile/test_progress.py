@@ -71,7 +71,8 @@ def test_extract_single_member_reports_one_member(tmp_path: Path) -> None:
     assert events[-1].total_bytes_done == 4
 
 
-def test_large_member_reports_byte_progress(small_step: None, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("small_step")
+def test_large_member_reports_byte_progress(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
     with ziplet.ZipFile(_archive({"big.bin": b"z" * BIG})) as zf:
         zf.extractall(tmp_path, progress=events.append)
@@ -107,7 +108,7 @@ def test_symlinks_and_directories_have_no_byte_progress(
 def test_progress_none_installs_no_wrapper(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    def forbidden(*args: object, **kwargs: object) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("progress wrapper used without a callback")
 
     monkeypatch.setattr(materialize, "_ProgressWriter", forbidden)
@@ -222,10 +223,11 @@ def test_callback_can_cancel_between_members(tmp_path: Path, use_policy: bool) -
     assert not (tmp_path / "second.txt").exists()
 
 
+@pytest.mark.usefixtures("small_step")
 @pytest.mark.parametrize("error", [Cancelled("stop"), ValueError("v"), OSError("o")])
 @pytest.mark.parametrize("use_policy", [False, True])
 def test_callback_error_during_byte_progress_cancels_cleanly(
-    small_step: None, tmp_path: Path, error: Exception, use_policy: bool
+    tmp_path: Path, error: Exception, use_policy: bool
 ) -> None:
     """Errors the policy path would report as member failures must still cancel."""
     callback = _cancel_when(PROGRESS, "big.bin", error)

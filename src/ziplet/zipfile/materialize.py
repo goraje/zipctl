@@ -17,7 +17,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, Protocol
+from typing import IO, Protocol
 
 from ziplet.zipfile.exceptions import (
     ExtractionMaterializationError,
@@ -99,9 +99,9 @@ class _QuotaWriter:
     """Write-through wrapper that raises once a size limit would be exceeded."""
 
     def __init__(self, target: _Writer, quota: ExtractionQuota) -> None:
-        self._target = target
-        self._quota = quota
-        self._member_written = 0
+        self._target: _Writer = target
+        self._quota: ExtractionQuota = quota
+        self._member_written: int = 0
 
     def write(self, data: bytes) -> int:
         member_total = self._member_written + len(data)
@@ -123,8 +123,8 @@ class _ProgressWriter:
     """Write-through wrapper that reports the bytes it passes on."""
 
     def __init__(self, target: _Writer, reporter: ProgressReporter) -> None:
-        self._target = target
-        self._reporter = reporter
+        self._target: _Writer = target
+        self._reporter: ProgressReporter = reporter
 
     def write(self, data: bytes) -> int:
         written = self._target.write(data)
@@ -156,7 +156,7 @@ def _unlink_leaf(name: str, dir_fd: int | None) -> bool:
 
 
 def _leaf_reference(
-    params: MaterializeParams, *operations: Callable[..., Any]
+    params: MaterializeParams, *operations: Callable[..., object]
 ) -> tuple[str, int | None]:
     """Return ``(name, dir_fd)`` for the leaf, falling back to the full path.
 

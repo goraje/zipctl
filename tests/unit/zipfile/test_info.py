@@ -75,7 +75,7 @@ class TestExtra:
         assert rest == f2
 
     def test_read_one_malformed_gives_none_id(self) -> None:
-        field, rest = _Extra.read_one(b"\x01")  # too short for header
+        field, _ = _Extra.read_one(b"\x01")  # too short for header
         assert field.id is None
 
     def test_iter_fields_empty_yields_nothing(self) -> None:
@@ -230,7 +230,7 @@ class TestZipInfoEncodeDataDescriptor:
     def test_zip64_format_uses_q_fields(self) -> None:
         zi = ZipInfo()
         result = zi.encode_datadescripter(True, 0, 2**32, 2**33)
-        sig, crc, csz, fsz = struct.unpack("<LLQQ", result)
+        sig, _, csz, fsz = struct.unpack("<LLQQ", result)
         assert sig == 0x08074B50
         assert csz == 2**32
         assert fsz == 2**33

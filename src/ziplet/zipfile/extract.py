@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Generic, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, TypeVar, cast
 
 if TYPE_CHECKING:
     from ziplet.zipfile.info import ZipInfo
@@ -83,9 +83,8 @@ def resolve_rule(
 ) -> ResolvedRule[_T | None]:
     """Unwrap *field_value*, returning its value and effective action."""
     if isinstance(field_value, ExtractPolicyRule):
-        return ResolvedRule(
-            field_value.value, field_value.on_violation or default_action
-        )
+        rule = cast("ExtractPolicyRule[_T]", field_value)
+        return ResolvedRule(rule.value, rule.on_violation or default_action)
     return ResolvedRule(field_value, default_action)
 
 
@@ -174,7 +173,7 @@ class ExtractionError(Exception):
     """Raised after a policy-enabled extraction encounters error violations."""
 
     def __init__(self, result: ExtractResult) -> None:
-        self.result = result
+        self.result: ExtractResult = result
         super().__init__(f"Extraction failed for {result.failed_count} member(s)")
 
 

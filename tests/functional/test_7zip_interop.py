@@ -18,7 +18,7 @@ import random
 import shutil
 import subprocess
 from pathlib import Path
-from typing import IO, Any, cast
+from typing import IO, cast
 
 import pytest
 
@@ -347,7 +347,7 @@ class _NonSeekableFile:
     def tell(self) -> int:
         raise io.UnsupportedOperation("tell")
 
-    def seek(self, *args: Any, **kwargs: Any) -> int:
+    def seek(self, _offset: int, _whence: int = 0) -> int:
         raise io.UnsupportedOperation("seek")
 
 
@@ -442,7 +442,7 @@ class TestNonSeekableOutput:
         zp = tmp_path / "streamed.zip"
         stream = _NonSeekableFile(zp)
         with ZipFile(
-            cast(IO[bytes], stream),
+            cast(IO[bytes], stream),  # pyright: ignore[reportInvalidCast]  # a stand-in file object
             "w",
             compression=compression,
             encryption=encryption,
@@ -537,7 +537,7 @@ class TestPasswordChecks:
         ]
     )
     def archive(self, request: pytest.FixtureRequest, tmp_path: Path) -> Path:
-        tool, _, kind = str(request.param).partition("-")
+        tool, _, kind = cast("str", request.param).partition("-")
         if tool == "7z":
             return _written_by_sevenzip(tmp_path, kind)
         return _written_by_ziplet(tmp_path, kind)

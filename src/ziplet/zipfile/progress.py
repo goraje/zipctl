@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -62,11 +62,11 @@ class _CallbackFailed(BaseException):
 
     def __init__(self, original: Exception) -> None:
         super().__init__(original)
-        self.original = original
+        self.original: Exception = original
 
 
 @contextmanager
-def propagate_callback_errors() -> Iterator[None]:
+def propagate_callback_errors() -> Generator[None]:
     """Re-raise an exception raised by a progress callback unchanged."""
     try:
         yield
@@ -80,14 +80,14 @@ class ProgressReporter:
     def __init__(
         self, callback: ProgressCallback, member_count: int, total_bytes: int
     ) -> None:
-        self._callback = callback
-        self._member_count = member_count
-        self._total_bytes = total_bytes
-        self._done_before_member = 0
+        self._callback: ProgressCallback = callback
+        self._member_count: int = member_count
+        self._total_bytes: int = total_bytes
+        self._done_before_member: int = 0
         self._member: ZipInfo | None = None
-        self._index = 0
-        self._member_bytes = 0
-        self._last_reported = 0
+        self._index: int = 0
+        self._member_bytes: int = 0
+        self._last_reported: int = 0
 
     def start(self, index: int, info: ZipInfo) -> None:
         self._member = info

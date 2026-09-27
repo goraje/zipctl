@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import importlib
 import sys
+from typing import cast
 from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+from typing_extensions import override
 
 from ziplet.compression import (
     ZIP_BZIP2,
@@ -81,9 +83,11 @@ class TestRegistryRegister:
         r = Registry()
 
         class _SentinelCompressor(CompressorBase):
+            @override
             def compress(self, data: bytes) -> bytes:
                 return data
 
+            @override
             def flush(self) -> bytes:
                 return b""
 
@@ -166,7 +170,8 @@ class TestSubmoduleImport:
             # ImportError for that module name.
             with mock.patch.dict(sys.modules, {backing_module: None}):
                 mod = importlib.import_module(submodule)
-                assert mod.compression_entry is None, (
+                entry = cast("CompressionEntry | None", mod.compression_entry)
+                assert entry is None, (
                     f"{submodule}.compression_entry should be None when "
                     f"{backing_module} is unavailable"
                 )

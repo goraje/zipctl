@@ -101,53 +101,46 @@ def _rejected_result(
     )
 
 
-def extract_with_policy(
-    infos: Sequence[ZipInfo],
-    destination: Path,
-    policy_root: Path,
-    policy: ExtractPolicy,
-    materialize: Materialize,
-    reporter: ProgressReporter | None = None,
-) -> ExtractResult:
-    """Extract *infos* under *policy*, reporting per-member outcomes.
+class _Extraction:
+    """The running totals and limits of one :func:`extract_with_policy` call."""
 
-    Each member is assessed first; only members whose findings permit it are
-    passed to *materialize*.  Failures are recorded, not raised.  When a
-    *reporter* is given, every member gets a start and a finish notification.
-    """
-    violations: list[ExtractViolation] = []
-    results: list[ExtractMemberResult] = []
-    state = ValidationState()
-    total_written = 0
+    def __init__(
+        self,
+        destination: Path,
+        policy_root: Path,
+        policy: ExtractPolicy,
+        materialize: Materialize,
+        reporter: ProgressReporter | None,
+        entry_limit: int | None,
+        violations: list[ExtractViolation],
+    ) -> None:
+        self.destination: Path = destination
+        self.policy_root: Path = policy_root
+        self.policy: ExtractPolicy = policy
+        self.materialize: Materialize = materialize
+        self.reporter: ProgressReporter | None = reporter
+        self.entry_limit: int | None = entry_limit
+        self.violations: list[ExtractViolation] = violations
+        self.state: ValidationState = ValidationState()
+        self.total_written: int = 0
+        self.member_limit: int | None = resolve_rule(
+            policy.max_member_size, policy.on_violation
+        ).value
+        self.total_limit: int | None = resolve_rule(
+            policy.max_total_uncompressed_size, policy.on_violation
+        ).value
 
-    # The entry-count limit applies to the archive as a whole: ERROR rejects
-    # everything before any file is written, SKIP keeps only the first N
-    # entries, and WARN just reports it.
-    entry_limit: int | None = None
-    count_violation = entry_count_violation(len(infos), policy)
-    if count_violation is not None:
-        violations.append(count_violation)
-        if count_violation.action == ViolationAction.ERROR:
-            return _rejected_result(infos, destination, policy, count_violation)
-        if count_violation.action == ViolationAction.SKIP:
-            entry_limit = resolve_rule(policy.max_entries, policy.on_violation).value
-        else:
-            warnings.warn(count_violation.message, stacklevel=_WARN_STACKLEVEL)
-    member_limit = resolve_rule(policy.max_member_size, policy.on_violation).value
-    total_limit = resolve_rule(
-        policy.max_total_uncompressed_size, policy.on_violation
-    ).value
-
-    def process(index: int, info: ZipInfo) -> ExtractMemberResult:
-        nonlocal total_written
-        if entry_limit is not None and index >= entry_limit:
+    def process(self, index: int, info: ZipInfo) -> ExtractMemberResult:
+        if self.entry_limit is not None and index >= self.entry_limit:
             return _member_result(info, MemberStatus.SKIPPED, None, 0, ())
-        state.total_declared += info.file_size
-        state.total_compressed += info.compress_size
-        assessment = assess_member(info, destination, policy_root, policy, state)
+        self.state.total_declared += info.file_size
+        self.state.total_compressed += info.compress_size
+        assessment = assess_member(
+            info, self.destination, self.policy_root, self.policy, self.state
+        )
         target = assessment.target
         member_violations = assessment.violations
-        violations.extend(member_violations)
+        self.violations.extend(member_violations)
 
         if assessment.has_errors:
             return _member_result(
@@ -160,23 +153,33 @@ def extract_with_policy(
         for violation in member_violations:
             warnings.warn(violation.message, stacklevel=_WARN_STACKLEVEL)
 
-        if policy.preview_only:
+        if self.policy.preview_only:
             return _member_result(
                 info, MemberStatus.PREVIEWED, target, 0, member_violations
             )
 
         assert target is not None
-        target = _unique_target(target, policy)
+        result = self._write(
+            info, _unique_target(target, self.policy), member_violations
+        )
+        self.total_written += result.bytes_written
+        return result
+
+    def _write(
+        self,
+        info: ZipInfo,
+        target: Path,
+        member_violations: tuple[ExtractViolation, ...],
+    ) -> ExtractMemberResult:
         was_existing = target.exists()
-        quota = ExtractionQuota(member_limit, total_limit, total_written)
+        quota = ExtractionQuota(self.member_limit, self.total_limit, self.total_written)
         try:
-            materialized = materialize(info, target, quota, reporter)
+            materialized = self.materialize(info, target, quota, self.reporter)
         except ExtractionQuotaExceeded as exc:
             code, message = exc.code, str(exc)
         except _MATERIALIZATION_ERRORS as exc:
             code, message = "extraction_error", str(exc)
         else:
-            total_written += materialized.bytes_written
             return _member_result(
                 info,
                 MemberStatus.EXTRACTED,
@@ -189,19 +192,18 @@ def extract_with_policy(
         violation = ExtractViolation(
             info.filename, code, message, ViolationAction.ERROR, target
         )
-        violations.append(violation)
+        self.violations.append(violation)
         return _member_result(
             info, MemberStatus.FAILED, target, 0, member_violations + (violation,)
         )
 
-    for index, info in enumerate(infos):
-        if reporter is not None:
-            reporter.start(index, info)
-        result = process(index, info)
-        results.append(result)
-        if reporter is not None:
-            reporter.finish(result.status, result.bytes_written)
 
+def _summarise(
+    destination: Path,
+    results: list[ExtractMemberResult],
+    violations: list[ExtractViolation],
+    policy: ExtractPolicy,
+) -> ExtractResult:
     extracted = sum(r.status == MemberStatus.EXTRACTED for r in results)
     skipped = sum(r.status == MemberStatus.SKIPPED for r in results)
     previewed = sum(r.status == MemberStatus.PREVIEWED for r in results)
@@ -219,3 +221,47 @@ def extract_with_policy(
         policy.preview_only,
         previewed,
     )
+
+
+def extract_with_policy(
+    infos: Sequence[ZipInfo],
+    destination: Path,
+    policy_root: Path,
+    policy: ExtractPolicy,
+    materialize: Materialize,
+    reporter: ProgressReporter | None = None,
+) -> ExtractResult:
+    """Extract *infos* under *policy*, reporting per-member outcomes.
+
+    Each member is assessed first; only members whose findings permit it are
+    passed to *materialize*.  Failures are recorded, not raised.  When a
+    *reporter* is given, every member gets a start and a finish notification.
+    """
+    violations: list[ExtractViolation] = []
+
+    # The entry-count limit applies to the archive as a whole: ERROR rejects
+    # everything before any file is written, SKIP keeps only the first N
+    # entries, and WARN just reports it.
+    entry_limit: int | None = None
+    count_violation = entry_count_violation(len(infos), policy)
+    if count_violation is not None:
+        violations.append(count_violation)
+        if count_violation.action == ViolationAction.ERROR:
+            return _rejected_result(infos, destination, policy, count_violation)
+        if count_violation.action == ViolationAction.SKIP:
+            entry_limit = resolve_rule(policy.max_entries, policy.on_violation).value
+        else:
+            warnings.warn(count_violation.message, stacklevel=_WARN_STACKLEVEL)
+
+    extraction = _Extraction(
+        destination, policy_root, policy, materialize, reporter, entry_limit, violations
+    )
+    results: list[ExtractMemberResult] = []
+    for index, info in enumerate(infos):
+        if reporter is not None:
+            reporter.start(index, info)
+        result = extraction.process(index, info)
+        results.append(result)
+        if reporter is not None:
+            reporter.finish(result.status, result.bytes_written)
+    return _summarise(destination, results, violations, policy)

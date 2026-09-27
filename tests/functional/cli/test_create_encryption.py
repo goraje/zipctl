@@ -5,18 +5,22 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
+from typing_extensions import Unpack
 
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import CreateReport, ListReport, load_json
 from tests.functional.cli.support import (
     END_OF_INPUT,
     HAS_PTY,
     PASSWORD,
+    Result,
+    RunOptions,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
 from ziplet import ZipFile
+from ziplet.cli.output import JsonValue
 from ziplet.zipfile.info import ZipInfo
 
 PW = PASSWORD.encode()
@@ -40,7 +44,9 @@ def tree(workdir: Path) -> Path:
     return workdir / "tree"
 
 
-def create(cli: CliRunner, workdir: Path, *args: str, **kw: Any) -> Any:
+def create(
+    cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]
+) -> Result:
     """``ziplet create out.zip . ARGS`` run inside the tree."""
     kw.setdefault("cwd", workdir / "tree")
     return cli("create", str(workdir / "out.zip"), ".", *args, **kw)
@@ -85,9 +91,10 @@ def read_all(path: Path, password: bytes) -> dict[str, bytes]:
 # --- --encryption
 
 
+@pytest.mark.usefixtures("tree")
 @pytest.mark.parametrize("method", ["aes128", "aes192", "aes256", "zipcrypto"])
 def test_encrypt_protects_every_file(
-    cli: CliRunner, workdir: Path, tree: Path, method: str
+    cli: CliRunner, workdir: Path, method: str
 ) -> None:
     result = create(cli, workdir, "--encryption", method, env=ENV)
     assert result.returncode == 0, result
@@ -98,24 +105,25 @@ def test_encrypt_protects_every_file(
     assert "5 encrypted" in result.stdout
 
 
-def test_directories_carry_no_encryption(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_directories_carry_no_encryption(cli: CliRunner, workdir: Path) -> None:
     create(cli, workdir, "--encryption", "aes256", env=ENV)
     with ZipFile(workdir / "out.zip") as zf:
         assert all(not i.is_encrypted for i in zf.infolist() if i.is_dir())
         assert zf.namelist()[0].endswith("/")
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_wrong_password_does_not_fit_what_was_created(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     create(cli, workdir, "--encryption", "aes256", env=ENV)
     assert not matches(cli, workdir / "out.zip", "not the password")
 
 
+@pytest.mark.usefixtures("tree")
 def test_every_encrypted_archive_is_read_back_by_our_extract(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     create(cli, workdir, "--encryption", "aes256", env=ENV)
     result = cli("extract", str(workdir / "out.zip"), "-d", str(workdir / "x"), env=ENV)
@@ -123,8 +131,9 @@ def test_every_encrypted_archive_is_read_back_by_our_extract(
     assert (workdir / "x" / "secrets" / "db.key").read_bytes() == b"db secret"
 
 
+@pytest.mark.usefixtures("tree")
 def test_the_standard_library_cannot_read_it_without_the_password(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     import zipfile
 
@@ -135,16 +144,16 @@ def test_the_standard_library_cannot_read_it_without_the_password(
             zf.read("notes.txt")
 
 
-def test_encrypt_none_is_a_plain_archive(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_encrypt_none_is_a_plain_archive(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--encryption", "none")
     assert result.returncode == 0, result
     assert set(schemes(workdir / "out.zip").values()) == {"none"}
 
 
+@pytest.mark.usefixtures("tree")
 def test_zipcrypto_is_flagged_as_legacy_and_the_flag_can_be_silenced(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     loud = create(cli, workdir, "--encryption", "zipcrypto", env=ENV)
     assert "ZipCrypto is a weak legacy cipher" in loud.stderr
@@ -154,12 +163,13 @@ def test_zipcrypto_is_flagged_as_legacy_and_the_flag_can_be_silenced(
     assert aes.stderr == ""
 
 
+@pytest.mark.usefixtures("tree")
 def test_aes_version_1_exposes_the_crc_and_2_hides_it(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     def crcs(*extra: str) -> set[str]:
         create(cli, workdir, "--encryption", "aes256", "--force", *extra, env=ENV)
-        listing = json.loads(cli("list", "--json", str(workdir / "out.zip")).stdout)
+        listing = load_json(cli("list", "--json", str(workdir / "out.zip")), ListReport)
         return {m["crc32"] for m in listing["members"] if not m["directory"]}
 
     assert crcs() == {"00000000"}
@@ -167,11 +177,12 @@ def test_aes_version_1_exposes_the_crc_and_2_hides_it(
     assert "00000000" not in crcs("--wz-aes-version", "1")
 
 
+@pytest.mark.usefixtures("tree")
 @pytest.mark.parametrize(
     "extra", [[], ["--encryption", "zipcrypto"], ["--encryption", "none"]]
 )
 def test_aes_version_without_aes_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path, extra: list[str]
+    cli: CliRunner, workdir: Path, extra: list[str]
 ) -> None:
     result = create(cli, workdir, "--wz-aes-version", "1", *extra, env=ENV)
     assert result.returncode == 2, result
@@ -179,9 +190,8 @@ def test_aes_version_without_aes_is_a_usage_error(
     assert not (workdir / "out.zip").exists()
 
 
-def test_an_unknown_method_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_an_unknown_method_is_a_usage_error(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--encryption", "rot13")
     assert result.returncode == 2
     assert "invalid choice" in result.stderr
@@ -190,8 +200,9 @@ def test_an_unknown_method_is_a_usage_error(
 # --- where --encryption gets its password
 
 
+@pytest.mark.usefixtures("tree")
 def test_the_password_can_come_from_a_file_or_standard_input(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     passfile = workdir / "pw"
     passfile.write_bytes(PW + b"\n")
@@ -216,8 +227,9 @@ def test_the_password_can_come_from_a_file_or_standard_input(
     assert not matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_password_that_is_not_utf8_is_kept_byte_for_byte(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     raw = b"\xff\xfe binary \x80"
     passfile = workdir / "pw"
@@ -226,9 +238,8 @@ def test_a_password_that_is_not_utf8_is_kept_byte_for_byte(
     assert read_all(workdir / "out.zip", raw) == FILES
 
 
-def test_the_file_beats_the_environment(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_the_file_beats_the_environment(cli: CliRunner, workdir: Path) -> None:
     passfile = workdir / "pw"
     passfile.write_bytes(b"from-file\n")
     create(
@@ -244,8 +255,9 @@ def test_the_file_beats_the_environment(
     assert not matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("tree")
 def test_two_different_passwords_are_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     passfile = workdir / "pw"
     passfile.write_bytes(b"one\n")
@@ -258,8 +270,9 @@ def test_two_different_passwords_are_a_usage_error(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("tree")
 def test_without_a_source_or_terminal_nothing_is_written(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(cli, workdir, "--encryption", "aes256")
     assert result.returncode == 2, result
@@ -267,8 +280,9 @@ def test_without_a_source_or_terminal_nothing_is_written(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("tree")
 def test_password_options_without_encrypt_are_refused_not_ignored(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     passfile = workdir / "pw"
     passfile.write_bytes(b"x\n")
@@ -279,15 +293,15 @@ def test_password_options_without_encrypt_are_refused_not_ignored(
         assert not (workdir / "out.zip").exists()
 
 
-def test_the_environment_alone_does_not_encrypt(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_the_environment_alone_does_not_encrypt(cli: CliRunner, workdir: Path) -> None:
     assert create(cli, workdir, env=ENV).returncode == 0
     assert set(schemes(workdir / "out.zip").values()) == {"none"}
 
 
+@pytest.mark.usefixtures("tree")
 def test_the_password_never_appears_in_any_output(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     for extra in ([], ["-v"], ["--json"]):
         result = create(
@@ -299,10 +313,9 @@ def test_the_password_never_appears_in_any_output(
 # --- typing the password
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_a_typed_password_is_asked_for_twice(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+def test_a_typed_password_is_asked_for_twice(cli: CliRunner, workdir: Path) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".", "--encryption", "aes256",
         replies=[PASSWORD, PASSWORD],
@@ -316,10 +329,9 @@ def test_a_typed_password_is_asked_for_twice(
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_the_typed_password_is_masked_where_python_allows(
-    workdir: Path, tree: Path
-) -> None:
+def test_the_typed_password_is_masked_where_python_allows(workdir: Path) -> None:
     result, _ = terminal(
         "create", str(workdir / "out.zip"), ".",
         "--encryption", "aes256",
@@ -328,13 +340,14 @@ def test_the_typed_password_is_masked_where_python_allows(
     )  # fmt: skip
     assert result.returncode == 0, result
     if sys.version_info >= (3, 14):
-        assert "*" * len(PASSWORD) in result.stderr
+        assert "*" * len(PASSWORD) in result.stderr  # pyright: ignore[reportUnreachable]  # basedpyright assumes Python 3.10
     else:
         assert "*" not in result.stderr
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_a_mismatch_writes_nothing(workdir: Path, tree: Path) -> None:
+def test_a_mismatch_writes_nothing(workdir: Path) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".", "--encryption", "aes256",
         replies=["one", "two"],
@@ -347,6 +360,7 @@ def test_a_mismatch_writes_nothing(workdir: Path, tree: Path) -> None:
     assert list(workdir.glob(".ziplet-*")) == []
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
 @pytest.mark.parametrize(
     ("replies", "extra"),
@@ -363,7 +377,7 @@ def test_a_mismatch_writes_nothing(workdir: Path, tree: Path) -> None:
     ],
 )
 def test_an_empty_answer_writes_nothing(
-    workdir: Path, tree: Path, replies: list[str], extra: list[str]
+    workdir: Path, replies: list[str], extra: list[str]
 ) -> None:
     result, _ = terminal(
         "create", str(workdir / "out.zip"), ".", "--encryption", "aes256", *extra,
@@ -374,10 +388,9 @@ def test_an_empty_answer_writes_nothing(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_interrupting_a_prompt_exits_130_and_leaves_nothing(
-    workdir: Path, tree: Path
-) -> None:
+def test_interrupting_a_prompt_exits_130_and_leaves_nothing(workdir: Path) -> None:
     result, _ = terminal(
         "create", str(workdir / "out.zip"), ".", "--encryption", "aes256",
         interrupt_at_prompt=1,
@@ -392,9 +405,10 @@ def test_interrupting_a_prompt_exits_130_and_leaves_nothing(
 # --- --protect
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
 def test_protect_asks_for_its_own_password_and_protects_only_matches(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".", "--protect", "secrets/**",
@@ -417,10 +431,9 @@ def test_protect_asks_for_its_own_password_and_protects_only_matches(
     assert not matches(cli, workdir / "out.zip", PASSWORD)
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_each_rule_gets_a_different_password(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+def test_each_rule_gets_a_different_password(cli: CliRunner, workdir: Path) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".",
         "--protect", "secrets/db.key=aes128", "--protect", "*.txt=zipcrypto",
@@ -442,10 +455,9 @@ def test_each_rule_gets_a_different_password(
     assert "ZipCrypto is a weak legacy cipher" in result.stderr
 
 
+@pytest.mark.usefixtures("cli", "tree")
 @needs_pty
-def test_the_first_matching_rule_wins(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+def test_the_first_matching_rule_wins(workdir: Path) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".",
         "--protect", "secrets/api.key=none", "--protect", "secrets/**",
@@ -458,9 +470,8 @@ def test_the_first_matching_rule_wins(
     assert schemes(workdir / "out.zip")["secrets/db.key"] == "aes256"
 
 
-def test_protect_none_carves_a_hole_in_encrypt(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_protect_none_carves_a_hole_in_encrypt(cli: CliRunner, workdir: Path) -> None:
     result = create(
         cli, workdir, "--encryption", "aes256", "--protect", "public/**=none", env=ENV
     )
@@ -476,16 +487,16 @@ def test_protect_none_carves_a_hole_in_encrypt(
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
-def test_only_none_rules_need_no_password_at_all(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_only_none_rules_need_no_password_at_all(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--protect", "public/**=none")
     assert result.returncode == 0, result
     assert set(schemes(workdir / "out.zip").values()) == {"none"}
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_protect_password_cannot_be_scripted_so_it_says_where_to_go(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(cli, workdir, "--protect", "secrets/**", env=ENV)
     assert result.returncode == 2, result
@@ -494,8 +505,9 @@ def test_a_protect_password_cannot_be_scripted_so_it_says_where_to_go(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_rule_that_decides_nothing_is_an_error_before_anything_happens(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(
         cli, workdir, "--encryption", "aes256", "--protect", "sercets/**=none", env=ENV
@@ -505,9 +517,8 @@ def test_a_rule_that_decides_nothing_is_an_error_before_anything_happens(
     assert not (workdir / "out.zip").exists()
 
 
-def test_a_shadowed_rule_is_an_error_too(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_shadowed_rule_is_an_error_too(cli: CliRunner, workdir: Path) -> None:
     result = create(
         cli, workdir, "--protect", "**=none", "--protect", "secrets/**=none"
     )
@@ -515,10 +526,9 @@ def test_a_shadowed_rule_is_an_error_too(
     assert "no member is decided by the rule for 'secrets/**'" in result.stderr
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_no_password_is_asked_when_a_rule_matches_nothing(
-    workdir: Path, tree: Path
-) -> None:
+def test_no_password_is_asked_when_a_rule_matches_nothing(workdir: Path) -> None:
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".", "--protect", "sercets/**",
         cwd=workdir / "tree",
@@ -527,8 +537,9 @@ def test_no_password_is_asked_when_a_rule_matches_nothing(
     assert prompts == 0
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_no_password_is_asked_when_no_file_needs_it(workdir: Path, tree: Path) -> None:
+def test_no_password_is_asked_when_no_file_needs_it(workdir: Path) -> None:
     """The default rule decides nothing here, so its password is not needed."""
     result, prompts = terminal(
         "create", str(workdir / "out.zip"), ".",
@@ -547,10 +558,9 @@ def test_no_password_is_asked_when_no_file_needs_it(workdir: Path, tree: Path) -
     assert prompts == 0
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
-def test_no_password_is_asked_when_the_archive_already_exists(
-    workdir: Path, tree: Path
-) -> None:
+def test_no_password_is_asked_when_the_archive_already_exists(workdir: Path) -> None:
     (workdir / "out.zip").write_bytes(b"keep")
     result, prompts = terminal(
         "create",
@@ -578,8 +588,9 @@ def test_an_equals_sign_inside_a_pattern_is_not_a_method(
     assert schemes(workdir / "out.zip") == {"k=v.txt": "none", "other.txt": "aes256"}
 
 
+@pytest.mark.usefixtures("tree")
 def test_the_member_names_that_rules_see_are_archive_paths(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = cli(
         "create", str(workdir / "out.zip"), "tree", "--encryption", "aes256",
@@ -594,7 +605,7 @@ def test_the_member_names_that_rules_see_are_archive_paths(
 # --- --encryption-spec
 
 
-def write_spec(workdir: Path, spec: Any) -> str:
+def write_spec(workdir: Path, spec: str | JsonValue) -> str:
     path = workdir / "spec.json"
     path.write_text(spec if isinstance(spec, str) else json.dumps(spec))
     return str(path)
@@ -604,7 +615,7 @@ def spec_env(**extra: str) -> dict[str, str]:
     return {"DB_PASS": "db-secret", "DEFAULT_PASS": "default-secret", **extra}
 
 
-FULL_SPEC = {
+FULL_SPEC: dict[str, JsonValue] = {
     "version": 1,
     "default": {"method": "aes256", "password": {"env": "DEFAULT_PASS"}},
     "rules": [
@@ -614,8 +625,9 @@ FULL_SPEC = {
 }
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_spec_drives_per_file_encryption_with_no_typing(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(workdir, FULL_SPEC)
     result = create(cli, workdir, "--encryption-spec", spec, env=spec_env())
@@ -635,9 +647,8 @@ def test_a_spec_drives_per_file_encryption_with_no_typing(
     assert "db-secret" not in result.stdout + result.stderr
 
 
-def test_every_kind_of_password_reference(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_every_kind_of_password_reference(cli: CliRunner, workdir: Path) -> None:
     (workdir / "vault.pw").write_bytes(b"file-secret\n")
     spec = write_spec(
         workdir,
@@ -677,9 +688,8 @@ def test_every_kind_of_password_reference(
     assert schemes(archive)["public/readme.txt"] == "none"
 
 
-def test_a_spec_can_be_read_from_standard_input(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_spec_can_be_read_from_standard_input(cli: CliRunner, workdir: Path) -> None:
     result = create(
         cli,
         workdir,
@@ -692,7 +702,8 @@ def test_a_spec_can_be_read_from_standard_input(
     assert schemes(workdir / "out.zip")["notes.txt"] == "aes256"
 
 
-def test_a_default_only_spec(cli: CliRunner, workdir: Path, tree: Path) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_default_only_spec(cli: CliRunner, workdir: Path) -> None:
     spec = write_spec(
         workdir, {"default": {"method": "aes192", "password": {"env": "DEFAULT_PASS"}}}
     )
@@ -702,8 +713,9 @@ def test_a_default_only_spec(cli: CliRunner, workdir: Path, tree: Path) -> None:
     assert set(schemes(workdir / "out.zip").values()) == {"aes192"}
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_spec_without_a_default_leaves_the_rest_plain(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(
         workdir,
@@ -724,9 +736,10 @@ def test_a_spec_without_a_default_leaves_the_rest_plain(
     assert schemes(workdir / "out.zip")["secrets/db.key"] == "aes256"
 
 
+@pytest.mark.usefixtures("tree")
 @needs_pty
 def test_a_spec_can_ask_for_a_password_at_the_terminal(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(
         workdir,
@@ -752,9 +765,8 @@ def test_a_spec_can_ask_for_a_password_at_the_terminal(
     assert matches(cli, workdir / "out.zip", "vault", "secrets/db.key")
 
 
-def test_a_prompt_in_a_spec_needs_a_terminal(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_prompt_in_a_spec_needs_a_terminal(cli: CliRunner, workdir: Path) -> None:
     spec = write_spec(
         workdir,
         {"default": {"method": "aes256", "password": {"prompt": "Password for all"}}},
@@ -764,7 +776,7 @@ def test_a_prompt_in_a_spec_needs_a_terminal(
     assert not (workdir / "out.zip").exists()
 
 
-def one(**fields: Any) -> str:
+def one(**fields: JsonValue) -> str:
     """A spec with a single rule built from *fields*."""
     return json.dumps({"rules": [fields]})
 
@@ -811,9 +823,10 @@ BAD_SPECS = [
 ]
 
 
+@pytest.mark.usefixtures("tree")
 @pytest.mark.parametrize(("spec", "message"), BAD_SPECS)
 def test_a_bad_spec_is_a_usage_error_and_writes_nothing(
-    cli: CliRunner, workdir: Path, tree: Path, spec: str, message: str
+    cli: CliRunner, workdir: Path, spec: str, message: str
 ) -> None:
     result = create(
         cli, workdir, "--encryption-spec", write_spec(workdir, spec), env=spec_env()
@@ -825,9 +838,8 @@ def test_a_bad_spec_is_a_usage_error_and_writes_nothing(
     assert not (workdir / "out.zip").exists()
 
 
-def test_all_the_problems_are_reported_together(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_all_the_problems_are_reported_together(cli: CliRunner, workdir: Path) -> None:
     spec = write_spec(
         workdir,
         {
@@ -844,9 +856,8 @@ def test_all_the_problems_are_reported_together(
     assert len(detail) == 3
 
 
-def test_duplicate_match_patterns_are_refused(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_duplicate_match_patterns_are_refused(cli: CliRunner, workdir: Path) -> None:
     rule = {"match": "a", "method": "none"}
     result = create(
         cli, workdir, "--encryption-spec", write_spec(workdir, {"rules": [rule, rule]})
@@ -855,10 +866,9 @@ def test_duplicate_match_patterns_are_refused(
     assert "duplicate pattern 'a'" in result.stderr
 
 
-def test_standard_input_serves_one_purpose_only(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
-    both = {
+@pytest.mark.usefixtures("tree")
+def test_standard_input_serves_one_purpose_only(cli: CliRunner, workdir: Path) -> None:
+    both: dict[str, JsonValue] = {
         "rules": [
             {"match": "a", "method": "aes256", "password": {"stdin": True}},
             {"match": "b", "method": "aes256", "password": {"stdin": True}},
@@ -882,12 +892,14 @@ def test_standard_input_serves_one_purpose_only(
     assert "standard input cannot be used for both" in spec_on_stdin.stderr
 
 
-def test_a_missing_spec_file(cli: CliRunner, workdir: Path, tree: Path) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_missing_spec_file(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--encryption-spec", str(workdir / "nope.json"))
     assert result.returncode == 2
     assert "cannot read encryption spec" in result.stderr
 
 
+@pytest.mark.usefixtures("tree")
 @pytest.mark.parametrize(
     "extra",
     [
@@ -898,7 +910,7 @@ def test_a_missing_spec_file(cli: CliRunner, workdir: Path, tree: Path) -> None:
     ],
 )
 def test_a_spec_cannot_be_mixed_with_the_other_ways_of_choosing(
-    cli: CliRunner, workdir: Path, tree: Path, extra: list[str]
+    cli: CliRunner, workdir: Path, extra: list[str]
 ) -> None:
     spec = write_spec(workdir, FULL_SPEC)
     result = create(cli, workdir, "--encryption-spec", spec, *extra, env=spec_env())
@@ -906,8 +918,9 @@ def test_a_spec_cannot_be_mixed_with_the_other_ways_of_choosing(
     assert not (workdir / "out.zip").exists()
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_spec_rule_that_decides_nothing_is_an_error(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(
         workdir,
@@ -927,14 +940,13 @@ def test_a_spec_rule_that_decides_nothing_is_an_error(
     assert not (workdir / "out.zip").exists()
 
 
-def test_aes_version_applies_to_spec_rules(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_aes_version_applies_to_spec_rules(cli: CliRunner, workdir: Path) -> None:
     spec = write_spec(workdir, FULL_SPEC)
     create(
         cli, workdir, "--encryption-spec", spec, "--wz-aes-version", "1", env=spec_env()
     )
-    listing = json.loads(cli("list", "--json", str(workdir / "out.zip")).stdout)
+    listing = load_json(cli("list", "--json", str(workdir / "out.zip")), ListReport)
     crcs = {m["name"]: m["crc32"] for m in listing["members"]}
     assert crcs["notes.txt"] != "00000000"
 
@@ -942,8 +954,9 @@ def test_aes_version_applies_to_spec_rules(
 # --- combined with the other options
 
 
+@pytest.mark.usefixtures("tree")
 def test_encryption_works_with_every_compression_method(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     for method in ("store", "deflate", "bzip2", "lzma"):
         result = create(
@@ -960,8 +973,9 @@ def test_encryption_works_with_every_compression_method(
         assert read_all(workdir / "out.zip", PW) == FILES
 
 
+@pytest.mark.usefixtures("tree")
 def test_append_can_add_encrypted_members_with_a_new_password(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     assert (
         cli(
@@ -982,18 +996,18 @@ def test_append_can_add_encrypted_members_with_a_new_password(
     assert matches(cli, workdir / "out.zip", PASSWORD)
 
 
-def test_the_json_report_names_the_encryption(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_the_json_report_names_the_encryption(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--encryption", "aes192", "--json", env=ENV)
-    document = json.loads(result.stdout)
+    document = load_json(result, CreateReport)
     files = [m for m in document["members"] if not m["directory"]]
     assert {m["encryption"] for m in files} == {"AES-192"}
     assert PASSWORD not in result.stdout
 
 
+@pytest.mark.usefixtures("tree")
 def test_verbose_shows_the_encryption_of_each_member(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(
         cli,
@@ -1018,7 +1032,10 @@ def test_the_readme_spec_example_is_valid(workdir: Path) -> None:
     from ziplet.cli.context import Context
 
     readme = Path(__file__).resolve().parents[3] / "README.md"
-    blocks = re.findall(r"```json\n(.*?)```", readme.read_text("utf-8"), re.DOTALL)
+    blocks = [
+        m[1]
+        for m in re.finditer(r"```json\n(.*?)```", readme.read_text("utf-8"), re.DOTALL)
+    ]
     (example,) = [b for b in blocks if '"match"' in b]
     vault = workdir / "vault"
     vault.write_bytes(b"secret\n")
@@ -1036,8 +1053,9 @@ def test_the_readme_spec_example_is_valid(workdir: Path) -> None:
 # --- malformed patterns and method typos
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_malformed_protect_pattern_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(cli, workdir, "--protect", "x**")
     assert result.returncode == 2, result
@@ -1045,16 +1063,16 @@ def test_a_malformed_protect_pattern_is_a_usage_error(
     assert "Traceback" not in result.stderr
 
 
-def test_a_mistyped_protect_method_is_named(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_a_mistyped_protect_method_is_named(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--protect", "notes.txt=aes265")
     assert result.returncode == 2, result
     assert "unknown method 'aes265' (did you mean 'aes256'?)" in result.stderr
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_malformed_spec_pattern_is_reported_with_the_other_issues(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     spec = write_spec(
         workdir,
@@ -1075,8 +1093,9 @@ def test_a_malformed_spec_pattern_is_reported_with_the_other_issues(
 # --- standard input and prompts without a terminal
 
 
+@pytest.mark.usefixtures("tree")
 def test_a_spec_on_standard_input_that_is_not_utf8_is_a_usage_error(
-    cli: CliRunner, workdir: Path, tree: Path
+    cli: CliRunner, workdir: Path
 ) -> None:
     result = create(cli, workdir, "--encryption-spec", "-", stdin=b"\xff")
     assert result.returncode == 2, result
@@ -1085,9 +1104,8 @@ def test_a_spec_on_standard_input_that_is_not_utf8_is_a_usage_error(
     assert not (workdir / "out.zip").exists()
 
 
-def test_the_protect_hint_names_the_pattern_once(
-    cli: CliRunner, workdir: Path, tree: Path
-) -> None:
+@pytest.mark.usefixtures("tree")
+def test_the_protect_hint_names_the_pattern_once(cli: CliRunner, workdir: Path) -> None:
     result = create(cli, workdir, "--protect", "secrets/**", env=ENV)
     assert result.returncode == 2, result
     assert "the password for secrets/** can only be typed at a terminal" in (
@@ -1096,6 +1114,7 @@ def test_the_protect_hint_names_the_pattern_once(
     assert "Password for Password" not in result.stderr
 
 
+@pytest.mark.usefixtures("tree")
 @pytest.mark.parametrize(
     ("spec", "who"),
     [
@@ -1118,7 +1137,7 @@ def test_the_protect_hint_names_the_pattern_once(
     ],
 )
 def test_a_spec_prompt_without_a_terminal_points_at_the_spec_references(
-    cli: CliRunner, workdir: Path, tree: Path, spec: dict[str, Any], who: str
+    cli: CliRunner, workdir: Path, spec: dict[str, JsonValue], who: str
 ) -> None:
     result = create(cli, workdir, "--encryption-spec", "-", stdin=json.dumps(spec))
     assert result.returncode == 2, result

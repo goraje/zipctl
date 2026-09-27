@@ -12,11 +12,13 @@ import difflib
 import json
 import math
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar, cast
+
+from typing_extensions import override
 
 from ziplet.zipfile.extract import (
     ExtractPolicy,
@@ -51,6 +53,7 @@ class PolicyIssue:
     path: str
     message: str
 
+    @override
     def __str__(self) -> str:
         return f"{self.path or '<policy>'}: {self.message}"
 
@@ -69,7 +72,11 @@ class _Invalid:
 
 _INVALID = _Invalid()
 
-_Parser = Callable[[Any, str, list[PolicyIssue]], Any]
+# What a field parser can produce; ``_Invalid`` means the issue was recorded.
+_Value = bool | int | float | Path | Enum | frozenset[str] | None
+_Parser = Callable[[object, str, list[PolicyIssue]], _Value | _Invalid]
+# A policy field as JSON data.
+_Json = str | int | float | bool | None | list[str] | dict[str, "_Json"]
 
 
 def _kind(value: object) -> str:
@@ -102,13 +109,15 @@ def _expected(
     return _bad(issues, path, f"expected {expected}, got {_kind(value)}")
 
 
-def _boolean(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
+def _boolean(value: object, path: str, issues: list[PolicyIssue]) -> bool | _Invalid:
     if isinstance(value, bool):
         return value
     return _expected(issues, path, "boolean", value)
 
 
-def _optional_limit(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
+def _optional_limit(
+    value: object, path: str, issues: list[PolicyIssue]
+) -> int | None | _Invalid:
     """A non-negative integer limit, or ``None`` for no limit."""
     if value is None:
         return None
@@ -119,7 +128,9 @@ def _optional_limit(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
     return value
 
 
-def _optional_ratio(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
+def _optional_ratio(
+    value: object, path: str, issues: list[PolicyIssue]
+) -> float | None | _Invalid:
     """A positive, finite compression ratio, or ``None`` for no limit."""
     if value is None:
         return None
@@ -136,10 +147,13 @@ def _optional_ratio(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
     return ratio
 
 
-def _enum(enum_type: type[_E]) -> _Parser:
-    choices = ", ".join(repr(member.value) for member in enum_type)
+def _enum(
+    enum_type: type[_E],
+) -> Callable[[object, str, list[PolicyIssue]], _E | _Invalid]:
+    # Enum.value is Any in typeshed
+    choices = ", ".join(repr(member.value) for member in enum_type)  # pyright: ignore[reportAny]
 
-    def parse(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
+    def parse(value: object, path: str, issues: list[PolicyIssue]) -> _E | _Invalid:
         if not isinstance(value, str):
             return _expected(issues, path, f"a string ({choices})", value)
         try:
@@ -154,7 +168,7 @@ _EXTENSION = re.compile(r"(\.[^./\\]+)+")
 
 
 def _extension_set(
-    value: Any, path: str, issues: list[PolicyIssue]
+    value: object, path: str, issues: list[PolicyIssue]
 ) -> frozenset[str] | None | _Invalid:
     """A set of lower-cased extensions such as ``.tar.gz``; ``null`` disables it."""
     if value is None:
@@ -163,7 +177,7 @@ def _extension_set(
         return _expected(issues, path, "list of strings or null", value)
     extensions: set[str] = set()
     ok = True
-    for index, item in enumerate(value):
+    for index, item in enumerate(cast("Iterable[object]", value)):
         item_path = f"{path}[{index}]"
         if not isinstance(item, str):
             _expected(issues, item_path, "string", item)
@@ -181,7 +195,9 @@ def _extension_set(
     return frozenset(extensions) if ok else _INVALID
 
 
-def _optional_path(value: Any, path: str, issues: list[PolicyIssue]) -> Any:
+def _optional_path(
+    value: object, path: str, issues: list[PolicyIssue]
+) -> Path | None | _Invalid:
     if value is None:
         return None
     if not isinstance(value, str):
@@ -221,8 +237,8 @@ _RULE_KEYS = ("value", "on_violation")
 
 
 def _parse_rule(
-    parser: _Parser, raw: Mapping[str, Any], path: str, issues: list[PolicyIssue]
-) -> Any:
+    parser: _Parser, raw: Mapping[str, object], path: str, issues: list[PolicyIssue]
+) -> ExtractPolicyRule[_Value] | None | _Invalid:
     """Parse ``{"value": ..., "on_violation": ...}`` into an ExtractPolicyRule.
 
     A rule whose value is ``null`` (no limit) becomes plain ``None``.
@@ -240,10 +256,15 @@ def _parse_rule(
         _bad(issues, path, "a rule object needs a 'value'")
         return _INVALID
     value = parser(raw["value"], f"{path}.value", issues)
-    action: Any = None
-    if raw.get("on_violation") is not None:
-        action = _ACTION(raw["on_violation"], f"{path}.on_violation", issues)
-    if not ok or value is _INVALID or action is _INVALID:
+    action: ViolationAction | None = None
+    raw_action = raw.get("on_violation")
+    if raw_action is not None:
+        parsed = _ACTION(raw_action, f"{path}.on_violation", issues)
+        if isinstance(parsed, ViolationAction):
+            action = parsed
+        else:
+            ok = False
+    if not ok or isinstance(value, _Invalid):
         return _INVALID
     if value is None:
         # No limit means nothing to act on, and the policy's types do not
@@ -265,7 +286,7 @@ def _unknown_field(name: str) -> str:
 
 
 def policy_from_mapping(
-    data: Mapping[str, Any], base: ExtractPolicy | None = None
+    data: Mapping[str, object], base: ExtractPolicy | None = None
 ) -> ExtractPolicy:
     """Build an :class:`ExtractPolicy` from JSON-style *data*.
 
@@ -278,13 +299,19 @@ def policy_from_mapping(
         PolicyConfigError: If *data* is not a valid policy document.  The
             error lists every problem, not just the first.
     """
+    return _from_document(data, base)
+
+
+def _from_document(data: object, base: ExtractPolicy | None) -> ExtractPolicy:
+    """Build a policy from *data*, which may be any decoded JSON value."""
     if not isinstance(data, Mapping):
         raise PolicyConfigError(
             [PolicyIssue("", f"expected an object, got {_kind(data)}")]
         )
     issues: list[PolicyIssue] = []
-    values: dict[str, Any] = {}
-    for name, raw in data.items():
+    # Each value was validated against its field; ``replace`` takes them as-is.
+    values: dict[str, Any] = {}  # pyright: ignore[reportExplicitAny]
+    for name, raw in cast("Mapping[object, object]", data).items():
         if name == "version":
             if (
                 isinstance(raw, bool)
@@ -297,15 +324,18 @@ def policy_from_mapping(
                     f"unsupported policy format version {raw!r}; "
                     f"this release reads version {POLICY_FORMAT_VERSION}",
                 )
-        elif name not in _FIELDS:
+        elif not isinstance(name, str) or name not in _FIELDS:
             _bad(issues, str(name), _unknown_field(str(name)))
         else:
             parser, wrappable = _FIELDS[name]
+            value: _Value | ExtractPolicyRule[_Value] | _Invalid
             if wrappable and isinstance(raw, Mapping):
-                value = _parse_rule(parser, raw, name, issues)
+                value = _parse_rule(
+                    parser, cast("Mapping[str, object]", raw), name, issues
+                )
             else:
                 value = parser(raw, name, issues)
-            if value is not _INVALID:
+            if not isinstance(value, _Invalid):
                 values[name] = value
     if issues:
         raise PolicyConfigError(issues)
@@ -324,7 +354,7 @@ def policy_from_json(text: str, base: ExtractPolicy | None = None) -> ExtractPol
     """
     duplicates: list[str] = []
 
-    def collect(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    def collect(pairs: list[tuple[str, object]]) -> dict[str, object]:
         seen: set[str] = set()
         for key, _ in pairs:
             if key in seen:
@@ -332,11 +362,12 @@ def policy_from_json(text: str, base: ExtractPolicy | None = None) -> ExtractPol
             seen.add(key)
         return dict(pairs)
 
-    def reject_constant(name: str) -> Any:
+    def reject_constant(name: str) -> NoReturn:
         raise ValueError(f"{name} is not allowed")
 
     try:
-        data = json.loads(
+        # json.loads is typed to return Any
+        data: object = json.loads(  # pyright: ignore[reportAny]
             text, object_pairs_hook=collect, parse_constant=reject_constant
         )
     except json.JSONDecodeError as exc:
@@ -354,17 +385,17 @@ def policy_from_json(text: str, base: ExtractPolicy | None = None) -> ExtractPol
         raise PolicyConfigError(
             [PolicyIssue(key, "duplicate key in a JSON object") for key in duplicates]
         )
-    return policy_from_mapping(data, base)
+    return _from_document(data, base)
 
 
-def _dump(value: object) -> Any:
+def _dump(value: _Value | ExtractPolicyRule[_Value]) -> _Json:
     if isinstance(value, ExtractPolicyRule):
-        rule: dict[str, Any] = {"value": _dump(value.value)}
+        rule: dict[str, _Json] = {"value": _dump(value.value)}
         if value.on_violation is not None:
             rule["on_violation"] = value.on_violation.value
         return rule
     if isinstance(value, Enum):
-        return value.value
+        return cast("str", value.value)  # Enum.value is Any
     if isinstance(value, (set, frozenset)):
         return sorted(value)
     if isinstance(value, Path):
@@ -372,7 +403,8 @@ def _dump(value: object) -> Any:
     return value
 
 
-def policy_to_mapping(policy: ExtractPolicy) -> dict[str, Any]:
+# The document is JSON data that callers index into freely, so it stays ``Any``.
+def policy_to_mapping(policy: ExtractPolicy) -> dict[str, Any]:  # pyright: ignore[reportExplicitAny]
     """Return *policy* as JSON-style data that :func:`policy_from_mapping` reads.
 
     Raises:
@@ -383,9 +415,9 @@ def policy_to_mapping(policy: ExtractPolicy) -> dict[str, Any]:
         raise PolicyConfigError(
             [PolicyIssue("custom_validator", _unknown_field("custom_validator"))]
         )
-    document: dict[str, Any] = {"version": POLICY_FORMAT_VERSION}
+    document: dict[str, _Json] = {"version": POLICY_FORMAT_VERSION}
     for name in _FIELDS:
-        document[name] = _dump(getattr(policy, name))
+        document[name] = _dump(getattr(policy, name))  # pyright: ignore[reportAny]
     return document
 
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
 from ziplet.cli.commands.helpers.copying.copy import run_copy
 from ziplet.cli.commands.helpers.copying.options import (
+    CopyArgs,
     add_copy_options,
     check_paths,
     copy_job,
@@ -20,6 +20,7 @@ from ziplet.cli.commands.helpers.encryption.options import (
 )
 from ziplet.cli.commands.helpers.encryption.plan import warn_if_weak
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     add_password_options,
     given_password,
@@ -35,7 +36,13 @@ from ziplet.cli.methods import ENCRYPTABLE, ENCRYPTION_METHODS
 from ziplet.cli.output import count, printable
 
 
-def cmd_encrypt(args: argparse.Namespace, ctx: Context) -> int:
+class EncryptArgs(CopyArgs, PasswordArgs, Protocol):
+    encryption: str
+    match: list[str]
+    wz_aes_version: int | None
+
+
+def cmd_encrypt(args: EncryptArgs, ctx: Context) -> int:
     job = copy_job(args)
     passwords = PasswordOptions.from_args(args)
     check_paths(job)
@@ -69,7 +76,7 @@ def cmd_encrypt(args: argparse.Namespace, ctx: Context) -> int:
         return run_copy(ctx, src, [None] * len(infos), targets, job, verb="Encrypted")
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "encrypt",

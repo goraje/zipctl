@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import CheckPasswordReport, load_json
 from tests.functional.cli.support import (
     HAS_PTY,
     PASSWORD,
+    Result,
     data_offset,
     flip_byte,
     write_archive,
@@ -49,13 +49,12 @@ def per_member(workdir: Path) -> Path:
     return path
 
 
-def _json(result: Any) -> dict[str, Any]:
+def _json(result: Result) -> CheckPasswordReport:
     assert result.stderr == "", result
-    document: dict[str, Any] = json.loads(result.stdout)
-    return document
+    return load_json(result, CheckPasswordReport)
 
 
-def _statuses(document: dict[str, Any]) -> dict[str, str]:
+def _statuses(document: CheckPasswordReport) -> dict[str, str]:
     return {m["name"]: m["status"] for m in document["members"]}
 
 
@@ -506,7 +505,9 @@ def test_no_password_is_asked_for_when_nothing_is_encrypted(
     result = cli("check-password", str(archive))  # no password of any kind
     assert result.returncode == 0, result
     assert result.stdout == "No encrypted members to check\n"
-    as_json = json.loads(cli("check-password", "--json", str(archive)).stdout)
+    as_json = load_json(
+        cli("check-password", "--json", str(archive)), CheckPasswordReport
+    )
     assert as_json["ok"] is True
     assert as_json["encrypted"] == 0
     assert as_json["members"] == [{"name": "a", "status": "unencrypted"}]

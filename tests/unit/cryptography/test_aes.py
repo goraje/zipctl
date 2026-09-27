@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import MagicMock
 
 import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -15,12 +14,11 @@ from ziplet.cryptography.aes import (
     _counter_blocks,
 )
 from ziplet.exceptions import BadZipFile
-from ziplet.zipfile.info import WzAesExtra
+from ziplet.zipfile.info import WzAesExtra, ZipInfo
 
 
-def _make_zinfo(strength: int | None = 3, filename: str = "test.txt") -> MagicMock:
-    zinfo = MagicMock()
-    zinfo.filename = filename
+def _make_zinfo(strength: int | None = 3, filename: str = "test.txt") -> ZipInfo:
+    zinfo = ZipInfo(filename)
     zinfo.aes_extra = WzAesExtra(wz_aes_strength=strength)
     return zinfo
 
@@ -176,28 +174,28 @@ class TestAesZipEncryptor:
 
     def test_update_zipinfo_sets_vendor_id(self) -> None:
         enc = AesZipEncryptor(b"pass")
-        zinfo = MagicMock()
+        zinfo = ZipInfo("a.txt")
         zinfo.aes_extra = WzAesExtra()
         enc.update_zipinfo(zinfo)
         assert zinfo.aes_extra.wz_aes_vendor_id == b"AE"
 
     def test_update_zipinfo_sets_strength(self) -> None:
         enc = AesZipEncryptor(b"pass", nbits=128)
-        zinfo = MagicMock()
+        zinfo = ZipInfo("a.txt")
         zinfo.aes_extra = WzAesExtra()
         enc.update_zipinfo(zinfo)
         assert zinfo.aes_extra.wz_aes_strength == 1
 
     def test_update_zipinfo_forced_version_applied(self) -> None:
         enc = AesZipEncryptor(b"pass", force_wz_aes_version=WZ_AES_V1)
-        zinfo = MagicMock()
+        zinfo = ZipInfo("a.txt")
         zinfo.aes_extra = WzAesExtra()
         enc.update_zipinfo(zinfo)
         assert zinfo.aes_extra.wz_aes_version == WZ_AES_V1
 
     def test_update_zipinfo_no_forced_version_leaves_version_untouched(self) -> None:
         enc = AesZipEncryptor(b"pass", force_wz_aes_version=None)
-        zinfo = MagicMock()
+        zinfo = ZipInfo("a.txt")
         zinfo.aes_extra = WzAesExtra(wz_aes_version=WZ_AES_V2)
         enc.update_zipinfo(zinfo)
         assert zinfo.aes_extra.wz_aes_version == WZ_AES_V2
@@ -217,7 +215,7 @@ class TestAesZipEncryptor:
 class TestAesZipDecrypter:
     def _make_pair(
         self, pwd: bytes, nbits: int = 256
-    ) -> tuple[AesZipEncryptor, MagicMock]:
+    ) -> tuple[AesZipEncryptor, ZipInfo]:
         enc = AesZipEncryptor(pwd, nbits=nbits)
         zinfo = _make_zinfo(strength=enc.aes_strength)
         return enc, zinfo

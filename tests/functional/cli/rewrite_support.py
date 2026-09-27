@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import struct
 from pathlib import Path
-from typing import Any
+from typing import NamedTuple
 
 import ziplet
 from ziplet import ZipFile
@@ -99,12 +99,26 @@ def make_mixed(path: Path) -> Path:
     return path
 
 
+class Row(NamedTuple):
+    """What :func:`snapshot` records of one member."""
+
+    date_time: tuple[int, int, int, int, int, int]
+    external_attr: int
+    comment: bytes
+    compress_type: int
+    is_dir: bool
+    data: bytes
+    internal_attr: int
+    create_system: int
+    carried_extra: bytes
+
+
 def snapshot(
     path: Path, passwords: dict[str, bytes] | bytes | None = None
-) -> dict[str, tuple[Any, ...]]:
+) -> dict[str, Row]:
     """Everything a copy must preserve, plus the decrypted data, per member."""
     with ZipFile(path) as zf:
-        rows: dict[str, tuple[Any, ...]] = {}
+        rows: dict[str, Row] = {}
         for info in zf.infolist():
             if isinstance(passwords, dict):
                 pwd = passwords.get(info.filename)
@@ -115,7 +129,7 @@ def snapshot(
                 if info.is_dir()
                 else zf.read(info, pwd=pwd if info.is_encrypted else None)
             )
-            rows[info.filename] = (
+            rows[info.filename] = Row(
                 info.date_time,
                 info.external_attr,
                 info.comment,
@@ -131,7 +145,7 @@ def snapshot(
 
 def schemes(path: Path) -> dict[str, str]:
     """Per member: none, zipcrypto, or aes128/192/256 (with ``-v1`` for AES-1)."""
-    out = {}
+    out: dict[str, str] = {}
     with ZipFile(path) as zf:
         for info in zf.infolist():
             if info.is_dir():

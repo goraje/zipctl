@@ -189,7 +189,7 @@ class TestReading:
         archive = _make_archive(tmp_path)
         path = Path(archive)
         with pytest.raises(ValueError, match="encoding args invalid"):
-            (path / "a.txt").open("rb", "utf-8")
+            (path / "a.txt").open("rb", "utf-8")  # type: ignore[call-overload]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     def test_open_missing_file_raises_file_not_found(
         self, tmp_path: pathlib.Path
@@ -344,7 +344,11 @@ def test_read_aes_encrypted_member_through_path(
 ) -> None:
     # A wrong password passes the 2-byte verifier 1 in 65536 times with a
     # random salt; pin the salt so the rejection below is deterministic.
-    monkeypatch.setattr("ziplet.cryptography.aes.os.urandom", lambda n: bytes(n))
+
+    def urandom(size: int) -> bytes:
+        return bytes(size)
+
+    monkeypatch.setattr("ziplet.cryptography.aes.os.urandom", urandom)
     archive = tmp_path / "secure.zip"
     password = b"hunter2-super-secret"
     with ziplet.ZipFile(archive, "w", encryption=ziplet.WZ_AES) as zf:

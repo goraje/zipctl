@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import zlib
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import (
     clean_env,
     command,
@@ -204,7 +203,7 @@ def test_every_compression_method_is_named(
 ) -> None:
     path = write_archive(workdir / "c.zip", [("f.txt", DATA)], compression=compression)
     assert label in cli("list", "-l", str(path)).stdout.splitlines()[1].split()
-    record = json.loads(cli("list", "--json", str(path)).stdout)["members"][0]
+    record = load_json(cli("list", "--json", str(path)), ListReport)["members"][0]
     assert record["compression"] == label
 
 
@@ -219,7 +218,11 @@ ENCRYPTIONS = [
 
 @pytest.mark.parametrize(("encryption", "extra", "label"), ENCRYPTIONS)
 def test_every_encryption_scheme_is_named_without_needing_a_password(
-    cli: CliRunner, workdir: Path, encryption: str, extra: Any, label: str
+    cli: CliRunner,
+    workdir: Path,
+    encryption: str,
+    extra: ziplet.ZipFileExtra | None,
+    label: str,
 ) -> None:
     path = write_archive(
         workdir / "e.zip",
@@ -232,7 +235,9 @@ def test_every_encryption_scheme_is_named_without_needing_a_password(
     assert result.returncode == 0, result
     assert label in result.stdout.splitlines()[1].split()
     assert (
-        json.loads(cli("list", "--json", str(path)).stdout)["members"][0]["encryption"]
+        load_json(cli("list", "--json", str(path)), ListReport)["members"][0][
+            "encryption"
+        ]
         == label
     )
 
@@ -248,7 +253,7 @@ def test_compression_inside_an_aes_entry_is_reported_not_the_aes_marker(
         encryption=ziplet.WZ_AES,
         password=b"pw",
     )
-    record = json.loads(cli("list", "--json", str(path)).stdout)["members"][0]
+    record = load_json(cli("list", "--json", str(path)), ListReport)["members"][0]
     assert record["compression"] == "deflate"
     assert record["encryption"] == "AES-256"
 
@@ -270,7 +275,7 @@ def test_json_describes_the_archive_and_every_member(
 
     result = cli("list", "--json", str(path))
     assert result.returncode == 0, result
-    document = json.loads(result.stdout)
+    document = load_json(result, ListReport)
     assert document["archive"] == str(path)
     assert document["comment"] == "archive comment é"
     assert document["member_count"] == 4
@@ -303,7 +308,7 @@ def test_saved_is_the_share_compression_removed(cli: CliRunner, workdir: Path) -
         zf.writestr("stored.txt", b"x" * 100, compress_type=ziplet.ZIP_STORED)
     rows = cli("list", "-l", str(path)).stdout.splitlines()
     assert rows[1].split()[3] == "0%"
-    assert json.loads(cli("list", "--json", str(path)).stdout)["ok"] is True
+    assert load_json(cli("list", "--json", str(path)), ListReport)["ok"] is True
 
 
 def test_json_keeps_hostile_names_exactly_and_is_pure_ascii(
@@ -314,7 +319,7 @@ def test_json_keeps_hostile_names_exactly_and_is_pure_ascii(
     result = cli("list", "--json", str(path))
     assert result.returncode == 0, result
     assert result.stdout.isascii()
-    listed = [member["name"] for member in json.loads(result.stdout)["members"]]
+    listed = [member["name"] for member in load_json(result, ListReport)["members"]]
     # ZipInfo ends a name at its first NUL byte; everything else survives.
     assert listed == [name.split("\x00")[0] for name in names]
 
@@ -324,7 +329,7 @@ def test_empty_archive(cli: CliRunner, workdir: Path) -> None:
     assert cli("list", str(path)).stdout == ""
     assert cli("list", str(path)).returncode == 0
     assert cli("list", "-l", str(path)).stdout.splitlines()[-1] == "0 members, 0 B"
-    assert json.loads(cli("list", "--json", str(path)).stdout)["member_count"] == 0
+    assert load_json(cli("list", "--json", str(path)), ListReport)["member_count"] == 0
 
 
 def test_archive_with_prepended_data_is_listed(cli: CliRunner, workdir: Path) -> None:

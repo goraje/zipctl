@@ -74,11 +74,15 @@ class Registry:
 
     def __init__(self) -> None:
         self._registry: dict[int, CompressionEntry] = {}
-        for mod in (stored, deflate, bz2, lzma, zstd):
-            if mod.compression_entry is not None:
-                self._registry[mod.compression_entry.compression_method] = (
-                    mod.compression_entry
-                )
+        for entry in (
+            stored.compression_entry,
+            deflate.compression_entry,
+            bz2.compression_entry,
+            lzma.compression_entry,
+            zstd.compression_entry,
+        ):
+            if entry is not None:
+                self._registry[entry.compression_method] = entry
 
     def register(self, method: int, entry: CompressionEntry) -> None:
         if method != entry.compression_method:

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import PASSWORD, write_archive
 from ziplet import ZipFile
 
@@ -43,7 +43,7 @@ def test_list_a_literal_name_beats_the_pattern_reading(
 def test_list_json_and_footer_describe_the_selection(
     cli: CliRunner, archive: Path
 ) -> None:
-    document = json.loads(cli("list", str(archive), "docs/**", "--json").stdout)
+    document = load_json(cli("list", str(archive), "docs/**", "--json"), ListReport)
     assert document["member_count"] == 2
     assert [m["name"] for m in document["members"]] == ["docs/a.md", "docs/deep/b.md"]
     long = cli("list", str(archive), "docs/**", "-l")

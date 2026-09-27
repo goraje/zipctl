@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
+from typing_extensions import override
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import ExtractReport, load_json
 from tests.functional.cli.support import (
     HAS_PTY,
     PASSWORD,
+    Result,
     data_offset,
     flip_byte,
     special_info,
@@ -76,13 +77,12 @@ def hostile(workdir: Path) -> Path:
     return path
 
 
-def _json(result: Any) -> dict[str, Any]:
+def _json(result: Result) -> ExtractReport:
     assert result.stderr == "", result
-    document: dict[str, Any] = json.loads(result.stdout)
-    return document
+    return load_json(result, ExtractReport)
 
 
-def _statuses(document: dict[str, Any]) -> dict[str, str]:
+def _statuses(document: ExtractReport) -> dict[str, str]:
     return {m["member"]: m["status"] for m in document["result"]["members"]}
 
 
@@ -897,9 +897,10 @@ def test_passwords_never_appear_in_the_output(
         assert "pass-beta" not in result.stdout + result.stderr
 
 
+@pytest.mark.usefixtures("cli")
 @pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
 def test_prompts_ask_once_per_distinct_password(
-    cli: CliRunner, per_member: Path, workdir: Path
+    per_member: Path, workdir: Path
 ) -> None:
     dest = workdir / "dest"
     result, prompts = terminal(
@@ -920,7 +921,7 @@ def test_interrupting_a_prompt_stops_cleanly_and_leaves_no_partial_files(
     per_member: Path, workdir: Path
 ) -> None:
     dest = workdir / "dest"
-    result, prompts = terminal(
+    result, _ = terminal(
         "extract", str(per_member), "-d", str(dest), interrupt_at_prompt=1
     )
     assert result.returncode == 130, result
@@ -1055,6 +1056,7 @@ def test_progress_lines_escape_hostile_names(cli: CliRunner, workdir: Path) -> N
 
 
 class _FakeTerminal(io.StringIO):
+    @override
     def isatty(self) -> bool:
         return True
 

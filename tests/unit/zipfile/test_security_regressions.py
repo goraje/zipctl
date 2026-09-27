@@ -5,9 +5,12 @@ import os
 import random
 import stat
 import struct
-from typing import Any, cast
+from collections.abc import Callable
+from pathlib import Path
+from typing import cast
 
 import pytest
+from typing_extensions import override
 
 import ziplet
 from tests.helpers import NonSeekableBytesIO
@@ -17,6 +20,7 @@ from ziplet.zipfile.exceptions import ExtractionMaterializationError
 from ziplet.zipfile.ext import ZipExtFile
 from ziplet.zipfile.file import ZipFileExtra
 from ziplet.zipfile.info import ZipInfo
+from ziplet.zipfile.io_wrappers import ClosableZipStream
 from ziplet.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_SIZE,
@@ -31,6 +35,7 @@ def test_read2_caps_forged_compressed_size_reads() -> None:
     class CountingStream(io.BytesIO):
         requested: int | None = None
 
+        @override
         def read(self, size: int | None = -1) -> bytes:
             requested = -1 if size is None else size
             self.requested = requested
@@ -38,7 +43,10 @@ def test_read2_caps_forged_compressed_size_reads() -> None:
 
     stream = CountingStream()
     ext = ZipExtFile.__new__(ZipExtFile)
-    ext._fileobj = cast(Any, stream)
+    ext._fileobj = cast(
+        "ClosableZipStream",
+        stream,  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
+    )
     ext._close_fileobj = False
     ext._compress_left = 1 << 40
     ext._decrypter = None
@@ -119,7 +127,7 @@ def _find_aes_metadata(archive: bytes) -> tuple[int, int, int, int]:
     ],
 )
 def test_read1_is_bounded_and_supports_split_reads(
-    tmp_path: Any,
+    tmp_path: Path,
     compression: int,
     payload: bytes,
 ) -> None:
@@ -131,7 +139,7 @@ def test_read1_is_bounded_and_supports_split_reads(
         zf.writestr("payload.bin", payload)
 
     with ziplet.ZipFile(path) as zf:
-        with cast(ZipExtFile, zf.open("payload.bin")) as source:
+        with cast(ZipExtFile, zf.open("payload.bin")) as source:  # pyright: ignore[reportInvalidCast]  # open() is typed IO[bytes]
             chunks: list[bytes] = []
             while True:
                 chunk = source.read1(17)
@@ -153,7 +161,7 @@ def test_read1_is_bounded_and_supports_split_reads(
     "compression",
     [ziplet.ZIP_DEFLATED, ziplet.ZIP_BZIP2, ziplet.ZIP_LZMA],
 )
-def test_truncated_compressed_member_raises(tmp_path: Any, compression: int) -> None:
+def test_truncated_compressed_member_raises(tmp_path: Path, compression: int) -> None:
     if not registry._registry.get(compression):
         pytest.skip("compression method unavailable")
 
@@ -175,7 +183,7 @@ def test_truncated_compressed_member_raises(tmp_path: Any, compression: int) -> 
             zf.read("payload.bin")
 
 
-def test_crc_mismatch_is_detected(tmp_path: Any) -> None:
+def test_crc_mismatch_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "crc.zip"
     with ziplet.ZipFile(path, "w") as zf:
         zf.writestr("payload.bin", b"payload")
@@ -192,7 +200,7 @@ def test_crc_mismatch_is_detected(tmp_path: Any) -> None:
 @pytest.mark.parametrize("compression", [ziplet.ZIP_STORED, ziplet.ZIP_DEFLATED])
 @pytest.mark.parametrize("payload", [b"x", b"x" * 8192])
 def test_aes_headers_have_consistent_v2_metadata(
-    tmp_path: Any,
+    tmp_path: Path,
     compression: int,
     payload: bytes,
 ) -> None:
@@ -210,7 +218,7 @@ def test_aes_headers_have_consistent_v2_metadata(
     assert local_version == central_version == ziplet.WZ_AES_V2
 
 
-def test_aes_v1_headers_preserve_crc(tmp_path: Any) -> None:
+def test_aes_v1_headers_preserve_crc(tmp_path: Path) -> None:
     path = tmp_path / "aes-v1.zip"
     payload = b"compatibility payload"
     with ziplet.ZipFile(
@@ -253,7 +261,7 @@ def test_aes_v2_data_descriptor_zeroes_crc() -> None:
     assert crc == 0
 
 
-def _symlink_archive(path: Any, name: str, target: str) -> None:
+def _symlink_archive(path: Path, name: str, target: str) -> None:
     info = ZipInfo(name)
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     with ziplet.ZipFile(path, "w") as zf:
@@ -262,7 +270,7 @@ def _symlink_archive(path: Any, name: str, target: str) -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="symlinks")
 def test_symlink_member_over_existing_directory_raises_extraction_error(
-    tmp_path: Any,
+    tmp_path: Path,
 ) -> None:
     archive = tmp_path / "link.zip"
     _symlink_archive(archive, "victim", "elsewhere")
@@ -276,7 +284,7 @@ def test_symlink_member_over_existing_directory_raises_extraction_error(
 
 
 def test_file_member_over_existing_directory_raises_extraction_error(
-    tmp_path: Any,
+    tmp_path: Path,
 ) -> None:
     archive = tmp_path / "file.zip"
     with ziplet.ZipFile(archive, "w") as zf:
@@ -291,7 +299,7 @@ def test_file_member_over_existing_directory_raises_extraction_error(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="symlinks")
-def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Any) -> None:
+def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Path) -> None:
     archive = tmp_path / "nested.zip"
     with ziplet.ZipFile(archive, "w") as zf:
         zf.writestr("sub/inner.txt", b"data")
@@ -307,7 +315,7 @@ def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Any) -> None
     assert list(outside.iterdir()) == []
 
 
-def test_extract_creates_nested_parents(tmp_path: Any) -> None:
+def test_extract_creates_nested_parents(tmp_path: Path) -> None:
     archive = tmp_path / "deep.zip"
     with ziplet.ZipFile(archive, "w") as zf:
         zf.writestr("a/b/c.txt", b"data")
@@ -321,7 +329,7 @@ def test_extract_creates_nested_parents(tmp_path: Any) -> None:
 @pytest.mark.skipif(os.name != "posix", reason="symlinks")
 @pytest.mark.parametrize("use_policy", [False, True])
 def test_extract_into_destination_reached_through_symlink(
-    tmp_path: Any, use_policy: bool
+    tmp_path: Path, use_policy: bool
 ) -> None:
     archive = tmp_path / "a.zip"
     with ziplet.ZipFile(archive, "w") as zf:
@@ -362,7 +370,7 @@ def _open_failure_zip64_required(zf: ziplet.ZipFile) -> None:
     ],
 )
 def test_failed_open_for_write_does_not_lock_the_archive(
-    failing_open: Any, error: type[Exception]
+    failing_open: Callable[[ziplet.ZipFile], None], error: type[Exception]
 ) -> None:
     buffer = io.BytesIO()
     with ziplet.ZipFile(buffer, "w", allowZip64=False) as zf:
@@ -376,14 +384,14 @@ def test_failed_open_for_write_does_not_lock_the_archive(
         assert zf.read("after.txt") == b"after"
 
 
-def _write_duplicates(archive: Any) -> None:
+def _write_duplicates(archive: Path) -> None:
     with ziplet.ZipFile(archive, "w") as zf:
         for _ in range(3):
             zf.writestr("same.txt", b"x")
         zf.writestr("other.txt", b"y")
 
 
-def test_assess_reports_each_duplicate_target_once(tmp_path: Any) -> None:
+def test_assess_reports_each_duplicate_target_once(tmp_path: Path) -> None:
     archive = tmp_path / "dups.zip"
     with pytest.warns(UserWarning, match="Duplicate name"):
         _write_duplicates(archive)

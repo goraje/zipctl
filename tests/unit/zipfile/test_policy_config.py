@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import io
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import cast
 
 import pytest
 
@@ -22,20 +24,22 @@ from ziplet import (
     policy_to_json,
     policy_to_mapping,
 )
+from ziplet.cli.output import JsonValue
 from ziplet.zipfile import policy_config
+from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.validators import extension_chains
 
 
-def _issues(data: Any) -> dict[str, str]:
+def _issues(data: object) -> dict[str, str]:
     """Load *data*, expecting failure, and return {path: message}."""
     with pytest.raises(PolicyConfigError) as excinfo:
-        policy_from_mapping(data)
+        policy_from_mapping(cast("Mapping[str, object]", data))
     return {issue.path: issue.message for issue in excinfo.value.issues}
 
 
-def _issue_list(data: Any) -> list[tuple[str, str]]:
+def _issue_list(data: object) -> list[tuple[str, str]]:
     with pytest.raises(PolicyConfigError) as excinfo:
-        policy_from_mapping(data)
+        policy_from_mapping(cast("Mapping[str, object]", data))
     return [(issue.path, issue.message) for issue in excinfo.value.issues]
 
 
@@ -104,7 +108,7 @@ def test_extension_sets_are_dumped_in_sorted_order() -> None:
     """Set iteration order varies between runs; the dump must not."""
     extensions = frozenset(f".e{number:02d}" for number in range(40))
     policy = ExtractPolicy(blocked_extensions=extensions)
-    dumped = policy_to_mapping(policy)["blocked_extensions"]
+    dumped = cast("object", policy_to_mapping(policy)["blocked_extensions"])
     assert dumped == sorted(extensions)
     rule = ExtractPolicy(blocked_extensions=ExtractPolicyRule(extensions))
     assert policy_to_mapping(rule)["blocked_extensions"]["value"] == sorted(extensions)
@@ -137,15 +141,16 @@ def test_policy_with_custom_validator_cannot_be_dumped() -> None:
         ("destination_root", "some/dir", Path("some/dir")),
         ("destination_root", None, None),
         ("allowed_extensions", None, None),
-        ("allowed_extensions", [], frozenset()),
+        ("allowed_extensions", list[str](), frozenset[str]()),
         ("allowed_extensions", [".TXT", ".txt"], frozenset({".txt"})),
         ("blocked_extensions", ("", ".Md"), frozenset({"", ".md"})),
     ],
 )
-def test_valid_values_are_accepted(field: str, value: Any, expected: Any) -> None:
+def test_valid_values_are_accepted(field: str, value: object, expected: object) -> None:
     policy = policy_from_mapping({field: value})
-    assert getattr(policy, field) == expected
-    assert type(getattr(policy, field)) is type(expected)
+    actual = cast("object", getattr(policy, field))
+    assert actual == expected
+    assert type(actual) is type(expected)
 
 
 @pytest.mark.parametrize(
@@ -184,7 +189,7 @@ def test_valid_values_are_accepted(field: str, value: Any, expected: Any) -> Non
     ],
 )
 def test_invalid_values_are_rejected_with_a_useful_message(
-    field: str, value: Any, fragment: str
+    field: str, value: object, fragment: str
 ) -> None:
     issues = _issue_list({field: value})
     assert len(issues) == 1
@@ -308,7 +313,7 @@ def test_custom_validator_gets_a_specific_message() -> None:
 
 
 @pytest.mark.parametrize("version", [2, 0, "1", 1.0, True, None])
-def test_only_format_version_one_is_accepted(version: Any) -> None:
+def test_only_format_version_one_is_accepted(version: object) -> None:
     issues = _issues({"version": version})
     assert "unsupported policy format version" in issues["version"]
 
@@ -321,7 +326,7 @@ def test_version_one_is_accepted() -> None:
     ("document", "kind"),
     [([], "list"), ("{}", "string"), (None, "null"), (5, "integer"), (True, "boolean")],
 )
-def test_the_document_itself_must_be_an_object(document: Any, kind: str) -> None:
+def test_the_document_itself_must_be_an_object(document: object, kind: str) -> None:
     assert _issues(document) == {"": f"expected an object, got {kind}"}
 
 
@@ -363,7 +368,7 @@ def test_a_valid_field_next_to_an_invalid_one_is_not_applied() -> None:
 
 
 def test_fields_missing_from_a_document_keep_the_base_values() -> None:
-    def validator(info: Any, target: Any) -> None:
+    def validator(_info: ZipInfo, _target: Path) -> None:
         return None
 
     base = ExtractPolicy(
@@ -438,7 +443,7 @@ def test_json_document_with_unicode_and_nested_rules() -> None:
 
 def test_default_policy_dump_is_a_valid_starting_document() -> None:
     text = policy_to_json(ExtractPolicy())
-    document = json.loads(text)
+    document = cast("dict[str, JsonValue]", json.loads(text))
     document["max_entries"] = 50
     assert policy_from_mapping(document).max_entries == 50
 
@@ -498,7 +503,7 @@ def test_loading_does_not_modify_the_input_document() -> None:
         "allowed_extensions": [".TXT"],
         "max_member_size": {"value": 5, "on_violation": "skip"},
     }
-    snapshot = json.loads(json.dumps(document))
+    snapshot = copy.deepcopy(document)
     policy_from_mapping(document)
     assert document == snapshot
 

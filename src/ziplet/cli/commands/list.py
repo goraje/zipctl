@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
 import stat
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
-from ziplet.cli.commands.helpers.command import add_command
-from ziplet.cli.commands.helpers.output_options import add_output_options
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
+from ziplet.cli.commands.helpers.output_options import OutputArgs, add_output_options
 from ziplet.cli.commands.helpers.selection import MEMBER_HELP, select_infos
 from ziplet.cli.context import Context
 from ziplet.cli.errors import EXIT_OK
@@ -23,6 +22,12 @@ from ziplet.cli.output import (
 )
 from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
+
+
+class ListArgs(OutputArgs, Protocol):
+    archive: str
+    members: list[str]
+    long: bool
 
 
 def _timestamp(info: ZipInfo, separator: str) -> str:
@@ -106,7 +111,7 @@ def _list_long(ctx: Context, zf: ZipFile, infos: list[ZipInfo]) -> None:
     if encrypted:
         headers.append("Encryption")
     headers += ["CRC-32", "Name"]
-    rows = []
+    rows: list[list[str]] = []
     for info in infos:
         row = [
             _mode_text(info),
@@ -135,7 +140,7 @@ def _list_long(ctx: Context, zf: ZipFile, infos: list[ZipInfo]) -> None:
             ctx.out(f"  {printable(line)}")
 
 
-def cmd_list(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_list(args: ListArgs, ctx: Context) -> int:
     with open_archive(args.archive) as zf:
         infos = select_infos(zf.infolist(), args.members)
         if args.json:
@@ -148,7 +153,7 @@ def cmd_list(args: argparse.Namespace, ctx: Context) -> int:
     return EXIT_OK
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(subparsers, "list", cmd_list, "list archive members")
     parser.add_argument("archive", metavar="ARCHIVE", help="the archive to list")
     parser.add_argument("members", nargs="*", metavar="MEMBER", help=MEMBER_HELP)

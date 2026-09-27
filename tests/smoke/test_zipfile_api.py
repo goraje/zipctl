@@ -5,8 +5,6 @@ from __future__ import annotations
 import io
 import warnings
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 
@@ -31,29 +29,6 @@ def _write_zip(buf: io.BytesIO, entries: dict[str, bytes]) -> io.BytesIO:
             zf.writestr(name, data)
     buf.seek(0)
     return buf
-
-
-def _write_encrypted_zip(
-    path: Path,
-    encryption: str,
-    content: bytes = CONTENT,
-) -> None:
-    if encryption == ziplet.ZIP_CRYPTO:
-        # ZipCrypto only validates one header byte, so a wrong password can
-        # randomly slip through and fail later as a CRC error. Keep the smoke
-        # test deterministic by fixing the generated header bytes.
-        with patch(
-            "ziplet.cryptography.zipcrypto.os.urandom",
-            return_value=b"\x00" * 11,
-        ):
-            with ZipFile(path, "w", encryption=encryption) as zf:
-                zf.setpassword(PASSWORD)
-                zf.writestr("secret.txt", content)
-        return
-
-    with ZipFile(path, "w", encryption=encryption) as zf:
-        zf.setpassword(PASSWORD)
-        zf.writestr("secret.txt", content)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +107,7 @@ class TestBadArchiveErrors:
 
     def test_invalid_mode_raises_value_error(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="mode"):
-            ZipFile(tmp_path / "x.zip", cast(Any, "q"))
+            ZipFile(tmp_path / "x.zip", "q")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     def test_metadata_encoding_on_write_raises_value_error(
         self, tmp_path: Path
@@ -164,7 +139,7 @@ class TestArchiveComment:
         path = tmp_path / "c.zip"
         with ZipFile(path, "w") as zf:
             with pytest.raises(TypeError):
-                zf.comment = cast(Any, "not bytes")
+                zf.comment = "not bytes"  # type: ignore[assignment]  # ty: ignore[invalid-assignment]  # pyright: ignore[reportAttributeAccessIssue]
 
     def test_oversized_comment_is_truncated(self, tmp_path: Path) -> None:
         path = tmp_path / "c.zip"
@@ -301,7 +276,7 @@ class TestSetPassword:
         path = tmp_path / "x.zip"
         with ZipFile(path, "w") as zf:
             with pytest.raises(TypeError, match="bytes"):
-                zf.setpassword(cast(Any, "not bytes"))
+                zf.setpassword("not bytes")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     def test_none_clears_password(self, tmp_path: Path) -> None:
         path = tmp_path / "x.zip"

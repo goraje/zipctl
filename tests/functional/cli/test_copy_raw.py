@@ -6,7 +6,7 @@ import random
 import struct
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -70,7 +70,9 @@ def test_the_compressed_size_survives_encrypting_and_decrypting(
 def test_nothing_is_compressed_when_the_compression_stays(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def no_compressor(*args: Any) -> Any:
+    def no_compressor(
+        _compress_type: int, _compresslevel: int | None = None
+    ) -> NoReturn:
         raise AssertionError("compressed again")
 
     monkeypatch.setattr(registry, "get_compressor", no_compressor)

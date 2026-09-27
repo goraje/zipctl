@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing_extensions import override
+
 from ziplet.compression.methods import (
     ZIP_DEFLATED,
     CompressionEntry,
@@ -27,12 +29,16 @@ try:
                     default compression level is used.
             """
             if level is not None:
-                self._c = zlib.compressobj(level, zlib.DEFLATED, -15)
+                # typeshed only exposes the object type under a private name
+                self._c: zlib._Compress = zlib.compressobj(  # pyright: ignore[reportPrivateUsage]
+                    level, zlib.DEFLATED, -15
+                )
             else:
                 self._c = zlib.compressobj(
                     zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15
                 )
 
+        @override
         def compress(self, data: bytes) -> bytes:
             """Compresses a chunk of data.
 
@@ -44,6 +50,7 @@ try:
             """
             return self._c.compress(data)
 
+        @override
         def flush(self) -> bytes:
             """Flushes any remaining buffered data and finalizes the stream.
 
@@ -63,9 +70,13 @@ try:
 
         def __init__(self) -> None:
             """Initializes the decompressor."""
-            self._d = zlib.decompressobj(-15)
+            # typeshed only exposes the object type under a private name
+            self._d: zlib._Decompress = zlib.decompressobj(  # pyright: ignore[reportPrivateUsage]
+                -15
+            )
 
         @property
+        @override
         def eof(self) -> bool:
             """Whether the end of the compressed stream has been reached.
 
@@ -76,6 +87,7 @@ try:
             return self._d.eof
 
         @property
+        @override
         def unconsumed_tail(self) -> bytes:
             """Data that was not consumed during the last decompress call.
 
@@ -86,9 +98,11 @@ try:
             return self._d.unconsumed_tail
 
         @property
+        @override
         def needs_input(self) -> bool:
             return not self._d.unconsumed_tail
 
+        @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
             """Decompresses a chunk of data.
 
@@ -104,6 +118,7 @@ try:
                 return self._d.decompress(data)
             return self._d.decompress(data, max_length)
 
+        @override
         def flush(self) -> bytes:
             """Flushes any remaining buffered data.
 

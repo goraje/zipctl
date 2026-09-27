@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ class Provider:
     """Hands out the right password per member and records what it was asked."""
 
     def __init__(self, table: dict[str, bytes | None] | None = None) -> None:
-        self.table = PASSWORDS if table is None else table
+        self.table: Mapping[str, bytes | None] = PASSWORDS if table is None else table
         self.asked: list[str] = []
 
     def __call__(self, info: ZipInfo) -> bytes | None:
@@ -147,7 +148,7 @@ def test_a_provider_returning_the_wrong_type_is_rejected(
 ) -> None:
     with ZipFile(io.BytesIO(archive)) as zf:
         with pytest.raises(TypeError, match="expected bytes"):
-            zf.extractall(tmp_path, pwd=lambda info: "text")  # type: ignore[arg-type,return-value]  # ty: ignore[invalid-argument-type]
+            zf.extractall(tmp_path, pwd=lambda info: "text")  # type: ignore[arg-type,return-value]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
 
 def test_plain_bytes_passwords_and_the_archive_password_still_work(

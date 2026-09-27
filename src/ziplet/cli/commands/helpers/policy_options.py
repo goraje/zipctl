@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Protocol
 
 from ziplet.cli.commands.helpers.sources import read_text_source
 from ziplet.cli.context import Context
@@ -11,9 +12,16 @@ from ziplet.cli.output import printable
 from ziplet.zipfile.extract import ExtractPolicy
 from ziplet.zipfile.policy_config import PolicyConfigError, policy_from_json
 
-__all__ = ["add_policy_options", "load_policy"]
+__all__ = ["PolicyArgs", "add_policy_options", "load_policy"]
 
 POLICY_ENV_VAR = "ZIPLET_POLICY"
+
+
+class PolicyArgs(Protocol):
+    """What :func:`add_policy_options` leaves on the parsed arguments."""
+
+    policy: str | None
+    policy_json: str | None
 
 
 def add_policy_options(parser: argparse.ArgumentParser) -> None:
@@ -39,7 +47,7 @@ def _parse(text: str, origin: str, base: ExtractPolicy) -> ExtractPolicy:
         ) from None
 
 
-def load_policy(args: argparse.Namespace, ctx: Context) -> ExtractPolicy:
+def load_policy(args: PolicyArgs, ctx: Context) -> ExtractPolicy:
     """Build the effective policy from the command-line options."""
     policy = ExtractPolicy()
     default_file = ctx.environ.get(POLICY_ENV_VAR)

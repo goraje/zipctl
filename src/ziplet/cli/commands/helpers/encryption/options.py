@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
 from ziplet.cli.commands.helpers.encryption.spec import plan_from_spec
 from ziplet.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
     PasswordOptions,
     given_password,
 )
@@ -30,6 +31,15 @@ from ziplet.cli.output import did_you_mean, printable
 from ziplet.cryptography import WZ_AES_DEFAULT_VERSION
 
 
+class EncryptionArgs(PasswordArgs, Protocol):
+    """What :func:`add_encryption_options` leaves on the parsed arguments."""
+
+    encryption: str | None
+    protect: list[str]
+    encryption_spec: str | None
+    wz_aes_version: int | None
+
+
 @dataclass(frozen=True)
 class EncryptionOptions:
     """The options of :func:`add_encryption_options`, with the password options."""
@@ -41,7 +51,7 @@ class EncryptionOptions:
     passwords: PasswordOptions
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> EncryptionOptions:
+    def from_args(cls, args: EncryptionArgs) -> EncryptionOptions:
         return cls(
             args.encryption,
             args.protect,
@@ -147,7 +157,7 @@ def require_aes_for_version(
         raise UsageError("--wz-aes-version only applies to AES encryption")
 
 
-def add_wz_aes_version(parser: Any) -> None:
+def add_wz_aes_version(parser: argparse.ArgumentParser) -> None:
     """Add ``--wz-aes-version`` to *parser*."""
     parser.add_argument(
         "--wz-aes-version",

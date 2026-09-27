@@ -2,22 +2,25 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
 import ziplet
 from ziplet.compression import ZIP_STORED
+from ziplet.cryptography.base import BaseZipEncryptor
 from ziplet.zipfile import write as write_mod
+from ziplet.zipfile.file import ZipFile
 from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
+from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR, ZIP64_LIMIT
 from ziplet.zipfile.write import ZipWriteFile
 
 
 class _FakeEncryptor:
     def __init__(self, header: bytes = b"hdr", flush_tail: bytes = b"tag") -> None:
-        self._header = header
-        self._flush_tail = flush_tail
+        self._zinfo: ZipInfo | None = None
+        self._header: bytes = header
+        self._flush_tail: bytes = flush_tail
 
     def update_zipinfo(self, zipinfo: ZipInfo) -> None:
         self._zinfo = zipinfo
@@ -36,11 +39,11 @@ class _FakeArchive:
     """The slice of ``ZipFile`` that ``ZipWriteFile`` collaborates with."""
 
     def __init__(self) -> None:
-        self.fp = io.BytesIO()
-        self.start_dir = 0
+        self.fp: io.BytesIO = io.BytesIO()
+        self.start_dir: int = 0
         self.filelist: list[ZipInfo] = []
         self.NameToInfo: dict[str, ZipInfo] = {}
-        self.modified = False
+        self.modified: bool = False
 
     def _mark_modified(self) -> None:
         self.modified = True
@@ -52,6 +55,20 @@ class _FakeArchive:
 
 def _make_parent() -> _FakeArchive:
     return _FakeArchive()
+
+
+def _as_zipfile(parent: _FakeArchive) -> ZipFile:
+    return cast(
+        "ZipFile",
+        parent,  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
+    )
+
+
+def _as_encryptor(encryptor: _FakeEncryptor) -> BaseZipEncryptor:
+    return cast(
+        "BaseZipEncryptor",
+        encryptor,  # pyright: ignore[reportInvalidCast]  # duck-typed stand-in
+    )
 
 
 def _make_zinfo(name: str) -> ZipInfo:
@@ -72,10 +89,10 @@ class TestZipWriteFile:
         zinfo = _make_zinfo("a.txt")
 
         zwf = ZipWriteFile(
-            cast(Any, parent),
+            _as_zipfile(parent),
             zinfo,
             zip64=False,
-            encryptor=cast(Any, _FakeEncryptor(header=b"abc")),
+            encryptor=_as_encryptor(_FakeEncryptor(header=b"abc")),
         )
 
         assert zwf._compress_size == 3
@@ -85,7 +102,7 @@ class TestZipWriteFile:
         parent = _make_parent()
         zinfo = _make_zinfo("b.txt")
 
-        with ZipWriteFile(cast(Any, parent), zinfo, zip64=False) as zwf:
+        with ZipWriteFile(_as_zipfile(parent), zinfo, zip64=False) as zwf:
             zwf.write(b"hello")
 
         assert zwf._state == write_mod.WriteState.COMMITTED
@@ -100,7 +117,7 @@ class TestZipWriteFile:
         parent = _make_parent()
         zinfo = _make_zinfo("big.txt")
 
-        zwf = ZipWriteFile(cast(Any, parent), zinfo, zip64=False)
+        zwf = ZipWriteFile(_as_zipfile(parent), zinfo, zip64=False)
         zwf.write(b"abcd")
 
         with pytest.raises(
@@ -119,10 +136,10 @@ class TestZipWriteFile:
         zinfo = _make_zinfo("big-compress.txt")
 
         zwf = ZipWriteFile(
-            cast(Any, parent),
+            _as_zipfile(parent),
             zinfo,
             zip64=False,
-            encryptor=cast(Any, _FakeEncryptor(header=b"", flush_tail=b"x" * 16)),
+            encryptor=_as_encryptor(_FakeEncryptor(header=b"", flush_tail=b"x" * 16)),
         )
         zwf.write(b"a")
 
@@ -141,28 +158,25 @@ class TestZipWriteFile:
         if use_descriptor:
             zinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
 
-        with ZipWriteFile(cast(Any, parent), zinfo, zip64=False) as zwf:
+        with ZipWriteFile(_as_zipfile(parent), zinfo, zip64=False) as zwf:
             zwf.write(b"abc")
 
         assert (b"PK\x07\x08" in parent.fp.getvalue()) is use_descriptor
 
-    def test_finalization_failure_marks_writer_failed(self) -> None:
+    def test_finalization_failure_marks_writer_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         parent = _make_parent()
         zinfo = _make_zinfo("failed.txt")
         zwf = ZipWriteFile(
-            cast(Any, parent),
+            _as_zipfile(parent),
             zinfo,
             zip64=False,
-            encryptor=cast(Any, _FakeEncryptor(flush_tail=b"x" * 20)),
+            encryptor=_as_encryptor(_FakeEncryptor(flush_tail=b"x" * 20)),
         )
-        write_module = cast(Any, write_mod)
-        original = write_module.ZIP64_LIMIT
-        write_module.ZIP64_LIMIT = 1
-        try:
-            with pytest.raises(RuntimeError):
-                zwf.close()
-        finally:
-            write_module.ZIP64_LIMIT = original
+        monkeypatch.setattr(write_mod, "ZIP64_LIMIT", 1)
+        with pytest.raises(RuntimeError):
+            zwf.close()
         assert zwf._state == write_mod.WriteState.FAILED
         assert zinfo not in parent.filelist
 
@@ -178,7 +192,7 @@ class TestWriteCoordinatorRecovery:
         `active` must treat FAILED as "not active" — otherwise every
         subsequent read, write, or close on this ZipFile raises forever.
         """
-        original_limit = cast(Any, write_mod).ZIP64_LIMIT
+        original_limit = ZIP64_LIMIT
         monkeypatch.setattr(write_mod, "ZIP64_LIMIT", 1)
         archive = tmp_path / "recover.zip"
         zf = ziplet.ZipFile(archive, "w")

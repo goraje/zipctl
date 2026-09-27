@@ -36,11 +36,11 @@ class ClosableZipStream:
                 write handle on the ZIP archive is open.
         """
         self._file: IO[bytes] | None = file
-        self._pos = pos
-        self._close = close
-        self._lock = lock
-        self._writing = writing
-        self.seekable = file.seekable
+        self._pos: int = pos
+        self._close: Callable[[IO[bytes]], None] = close
+        self._lock: threading.RLock = lock
+        self._writing: Callable[[], bool] = writing
+        self.seekable: Callable[[], bool] = file.seekable
 
     def tell(self) -> int:
         """Return the current stream position.
@@ -145,7 +145,7 @@ class Tellable:
         Args:
             fp: The unseekable stream to wrap.
         """
-        self.fp = fp
+        self.fp: IO[bytes] = fp
         self.offset: int = 0
 
     def write(self, data: bytes) -> int:
@@ -163,7 +163,7 @@ class Tellable:
         self.offset += n
         return n
 
-    def seek(self, offset: int, whence: int = 0) -> int:
+    def seek(self, offset: int, whence: int = 0) -> int:  # pyright: ignore[reportUnusedParameter]  # fixed by io.IOBase.seek
         """Seeking is not supported.
 
         Args:

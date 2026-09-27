@@ -8,6 +8,7 @@ import subprocess
 import sys
 from importlib.metadata import version
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -240,7 +241,10 @@ def _all_parsers(parser: argparse.ArgumentParser) -> list[argparse.ArgumentParse
     found = [parser]
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
-            for sub in action._name_parser_map.values():
+            subparsers = cast(
+                "argparse._SubParsersAction[argparse.ArgumentParser]", action
+            )
+            for sub in subparsers._name_parser_map.values():
                 found.extend(_all_parsers(sub))
     return found
 

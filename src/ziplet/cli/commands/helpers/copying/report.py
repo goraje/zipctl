@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ziplet.cli.commands.helpers.copying.options import CopyJob
 from ziplet.cli.commands.helpers.copying.targets import Copied
 from ziplet.cli.context import Context
-from ziplet.cli.output import count, printable, write_json
+from ziplet.cli.output import JsonValue, count, printable, write_json
 
 
 def report_copy(ctx: Context, job: CopyJob, verb: str, copied: list[Copied]) -> None:
     files = [c for c in copied if not c.directory]
     encrypted = sum(c.after.is_encrypted for c in files)
     if job.report.json:
-        members: list[dict[str, Any]] = [
+        members: list[dict[str, JsonValue]] = [
             {
                 "name": c.name,
                 "directory": c.directory,

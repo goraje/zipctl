@@ -5,9 +5,9 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
+from typing_extensions import override
 
 from tests.unit.cli.conftest import new_context
 from ziplet.cli.commands.helpers.encryption.options import _split_protect
@@ -20,6 +20,7 @@ from ziplet.cli.commands.helpers.passwords.sources import (
 from ziplet.cli.context import Context
 from ziplet.cli.errors import CliError
 from ziplet.cli.methods import ENCRYPTION_METHODS
+from ziplet.cli.output import JsonValue
 
 
 @pytest.mark.parametrize(
@@ -43,13 +44,13 @@ def test_split_protect_flags_a_near_miss_method_as_a_typo() -> None:
     assert "did you mean 'aes256'" in caught.value.message
 
 
-def spec(**parts: Any) -> str:
+def spec(**parts: JsonValue) -> str:
     return json.dumps(parts)
 
 
-def issues_of(text: str, **kwargs: Any) -> tuple[str, ...]:
+def issues_of(text: str, stdin: str = "") -> tuple[str, ...]:
     with pytest.raises(CliError) as caught:
-        plan_from_spec(text, "spec.json", readers_for(new_context(**kwargs)))
+        plan_from_spec(text, "spec.json", readers_for(new_context(stdin=stdin)))
     assert caught.value.code == 2
     return caught.value.details
 
@@ -201,6 +202,7 @@ def test_a_spec_reads_its_passwords_through_the_readers_it_is_given() -> None:
 
 
 class _Terminal(io.StringIO):
+    @override
     def isatty(self) -> bool:
         return True
 

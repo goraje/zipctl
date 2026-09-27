@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import os
 import random
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import CopyReport, load_json
 from tests.functional.cli.rewrite_support import (
     FILES,
     PASSWORD,
@@ -21,20 +21,28 @@ from tests.functional.cli.rewrite_support import (
     make_source,
     snapshot,
 )
-from tests.functional.cli.support import data_offset, flip_byte, write_archive
+from tests.functional.cli.support import Result, data_offset, flip_byte, write_archive
 from ziplet import ZipFile
 
 AES256 = ziplet.ZipFileExtra(wz_aes_nbits=256)
 
 
 def write_for(
-    command: str, path: Path, members: list[tuple[str, bytes]], **more: Any
+    command: str,
+    path: Path,
+    members: list[tuple[str, bytes]],
+    compression: int = ziplet.ZIP_STORED,
 ) -> Path:
     """An archive fit for *command*: plain for encrypt, AES-256 for the others."""
     if command == "encrypt":
-        return write_archive(path, members, **more)
+        return write_archive(path, members, compression=compression)
     return write_archive(
-        path, members, encryption=ziplet.WZ_AES, password=PW, extra=AES256, **more
+        path,
+        members,
+        encryption=ziplet.WZ_AES,
+        password=PW,
+        extra=AES256,
+        compression=compression,
     )
 
 
@@ -43,7 +51,7 @@ def job(request: pytest.FixtureRequest, workdir: Path) -> tuple[str, Path, list[
     """(command, source archive, options that make the command succeed)."""
     pw = workdir / "pw"
     pw.write_text(PASSWORD + "\n")
-    name: str = request.param
+    name = cast("str", request.param)
     if name == "encrypt":
         source = make_source(workdir / "in.zip")
         return name, source, ["--password-file", str(pw)]
@@ -55,7 +63,9 @@ def job(request: pytest.FixtureRequest, workdir: Path) -> tuple[str, Path, list[
     return name, source, ["--old-password-file", str(pw), "--compression", "store"]
 
 
-def go(cli: CliRunner, job: tuple[str, Path, list[str]], out: Path, *more: str):  # type: ignore[no-untyped-def]
+def go(
+    cli: CliRunner, job: tuple[str, Path, list[str]], out: Path, *more: str
+) -> Result:
     name, source, options = job
     return cli(name, str(source), str(out), *options, *more)
 
@@ -185,7 +195,7 @@ def test_a_damaged_member_fails_the_run_and_leaves_nothing(
 def test_everything_but_the_protection_is_preserved(
     cli: CliRunner, workdir: Path, job: tuple[str, Path, list[str]]
 ) -> None:
-    name, source, options = job
+    name, source, _ = job
     out = workdir / "out.zip"
     result = go(cli, job, out)
     assert result.returncode == 0, result
@@ -308,7 +318,7 @@ def test_json_output_describes_the_copy(
     out = workdir / "out.zip"
     result = go(cli, job, out, "--json")
     assert result.returncode == 0, result
-    doc = json.loads(result.stdout)
+    doc = load_json(result, CopyReport)
     assert doc["ok"] is True
     assert doc["input"] == str(source)
     assert doc["output"] == str(out)
@@ -331,7 +341,7 @@ def test_json_output_is_only_json_even_with_verbose(
 ) -> None:
     result = go(cli, job, workdir / "out.zip", "--json", "-v")
     assert result.returncode == 0, result
-    json.loads(result.stdout)
+    load_json(result, CopyReport)
 
 
 def test_no_verify_is_reported(
@@ -340,7 +350,9 @@ def test_no_verify_is_reported(
     result = go(cli, job, workdir / "out.zip", "--no-verify")
     assert result.returncode == 0, result
     assert "verified" not in result.stdout
-    doc = json.loads(go(cli, job, workdir / "o2.zip", "--no-verify", "--json").stdout)
+    doc = load_json(
+        go(cli, job, workdir / "o2.zip", "--no-verify", "--json"), CopyReport
+    )
     assert doc["verified"] is False
 
 

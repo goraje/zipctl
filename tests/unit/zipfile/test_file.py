@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
-from unittest import mock
 
 import pytest
 
@@ -52,7 +50,7 @@ class TestZipFileOpenReadBranches:
 
         with ZipFile(path, "r") as zf:
             with pytest.raises(TypeError, match="pwd: expected bytes, got str"):
-                zf.open("secret.txt", pwd=cast(Any, "not-bytes"))
+                zf.open("secret.txt", pwd="not-bytes")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # pyright: ignore[reportArgumentType]
 
     @pytest.mark.parametrize(
         ("flag", "msg"),
@@ -144,12 +142,12 @@ class TestZipFileCompressionValidation:
     def test_patched_method_unavailable_raises_runtime_error(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         method: int,
         module_name: str,
     ) -> None:
         path = tmp_path / "patched.zip"
-        with mock.patch.dict(_comp_registry._registry, clear=False) as patched:
-            patched.pop(method, None)
-            with pytest.raises(RuntimeError, match=module_name):
-                with ZipFile(path, "w", compression=method) as zf:
-                    zf.writestr("f.txt", "data")
+        monkeypatch.delitem(_comp_registry._registry, method, raising=False)
+        with pytest.raises(RuntimeError, match=module_name):
+            with ZipFile(path, "w", compression=method) as zf:
+                zf.writestr("f.txt", "data")

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import struct
-from typing import Any
 
 import pytest
 
@@ -105,7 +104,8 @@ def force_zip64(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(records, "ZIP_FILECOUNT_LIMIT", 1)
 
 
-def test_zip64_end_records_round_trip(force_zip64: None) -> None:
+@pytest.mark.usefixtures("force_zip64")
+def test_zip64_end_records_round_trip() -> None:
     data = _archive(("a.txt", "b.txt", "c.txt"))
     assert END_ARCHIVE64_LOCATOR_SIGNATURE in data
     record = read_end_record(io.BytesIO(data))
@@ -115,7 +115,8 @@ def test_zip64_end_records_round_trip(force_zip64: None) -> None:
         assert zf.namelist() == ["a.txt", "b.txt", "c.txt"]
 
 
-def test_zip64_required_but_disallowed_raises(force_zip64: None) -> None:
+@pytest.mark.usefixtures("force_zip64")
+def test_zip64_required_but_disallowed_raises() -> None:
     infos = [ZipInfo("a"), ZipInfo("b")]
     for info in infos:
         info.CRC = 0
@@ -124,7 +125,8 @@ def test_zip64_required_but_disallowed_raises(force_zip64: None) -> None:
         write_directory(io.BytesIO(), infos, 0, b"", allow_zip64=False)
 
 
-def test_multi_disk_zip64_locator_is_rejected(force_zip64: None) -> None:
+@pytest.mark.usefixtures("force_zip64")
+def test_multi_disk_zip64_locator_is_rejected() -> None:
     data = bytearray(_archive(("a.txt", "b.txt")))
     locator = data.index(END_ARCHIVE64_LOCATOR_SIGNATURE)
     struct.pack_into("<L", data, locator + 16, 2)  # total number of disks
@@ -150,7 +152,7 @@ def test_supported_flags_pass() -> None:
     raise_for_unsupported_flags(ZipInfo("f.txt"))
 
 
-def _corrupt_local_header(offset_in_header: int, value: bytes) -> Any:
+def _corrupt_local_header(offset_in_header: int, value: bytes) -> io.BytesIO:
     data = bytearray(_archive())
     data[offset_in_header : offset_in_header + len(value)] = value
     return io.BytesIO(bytes(data))

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 import ziplet
 from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.reports import InspectReport, load_json
 from tests.functional.cli.support import (
     PASSWORD,
     Result,
@@ -20,6 +21,7 @@ from tests.functional.cli.support import (
     write_archive,
 )
 from ziplet import ZipFile
+from ziplet.cli.output import JsonValue
 
 S_IFLNK, S_IFIFO, S_IFCHR = 0o120000, 0o010000, 0o020000
 
@@ -58,13 +60,12 @@ def hostile_archive(workdir: Path) -> Path:
     return path
 
 
-def _json(result: Result) -> dict[str, Any]:
+def _json(result: Result) -> InspectReport:
     assert result.stderr == "", result
-    document: dict[str, Any] = json.loads(result.stdout)
-    return document
+    return load_json(result, InspectReport)
 
 
-def _codes(document: dict[str, Any]) -> dict[str, set[str]]:
+def _codes(document: InspectReport) -> dict[str, set[str]]:
     found: dict[str, set[str]] = {}
     for violation in document["inspection"]["violations"]:
         found.setdefault(violation["member"], set()).add(violation["code"])
@@ -220,7 +221,9 @@ def test_default_policy_matches_what_extraction_enforces(
 # --- policies -------------------------------------------------------------------
 
 
-def _policy(workdir: Path, document: dict[str, Any], name: str = "policy.json") -> Path:
+def _policy(
+    workdir: Path, document: Mapping[str, JsonValue], name: str = "policy.json"
+) -> Path:
     path = workdir / name
     path.write_text(json.dumps(document))
     return path

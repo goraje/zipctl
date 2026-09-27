@@ -9,6 +9,7 @@ import sys
 from collections.abc import Iterator
 
 import pytest
+from typing_extensions import override
 
 from ziplet.cli.commands.helpers.progress import (
     ProgressRenderer,
@@ -19,10 +20,6 @@ from ziplet.zipfile.extract import MemberStatus
 from ziplet.zipfile.progress import ProgressEvent, ProgressPhase
 
 HAS_PTY = sys.platform != "win32"
-if HAS_PTY:
-    import fcntl
-    import pty
-    import termios
 
 
 def test_steps_report_a_start_and_a_finish_with_running_totals() -> None:
@@ -60,7 +57,7 @@ def test_a_plain_stream_gets_one_status_line_per_finished_member() -> None:
 def test_a_step_reporter_without_a_callback_does_nothing_and_reads_no_members() -> None:
     def members() -> Iterator[tuple[str, int]]:
         raise AssertionError("members must not be read")
-        yield ("never", 0)
+        yield ("never", 0)  # pyright: ignore[reportUnreachable]  # makes members() a generator
 
     steps = StepReporter(None, members())
     steps.start(0)
@@ -69,7 +66,7 @@ def test_a_step_reporter_without_a_callback_does_nothing_and_reads_no_members() 
 
 class Clock:
     def __init__(self) -> None:
-        self.now = 0.0
+        self.now: float = 0.0
 
     def __call__(self) -> float:
         return self.now
@@ -115,6 +112,10 @@ def test_the_status_line_fits_the_terminal_it_is_drawn_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Width comes from the progress stream, not from (redirected) standard output."""
+    import fcntl  # POSIX only, so imported here rather than at module level
+    import pty
+    import termios
+
     monkeypatch.delenv("COLUMNS", raising=False)
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 40, 0, 0))
@@ -143,6 +144,7 @@ def test_the_status_line_fits_the_terminal_it_is_drawn_on(
 
 
 class _Terminal(io.StringIO):
+    @override
     def isatty(self) -> bool:
         return True
 

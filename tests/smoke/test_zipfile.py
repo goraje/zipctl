@@ -32,7 +32,7 @@ COMPRESSIONS = [
     ),
 ]
 
-# (enc_write, enc_read, needs_password)
+# Columns: encryption on write, encryption on read, whether a password is needed.
 ENCRYPTIONS = [
     pytest.param(None, None, False, id="None"),
     pytest.param(ziplet.WZ_AES, ziplet.WZ_AES, True, id="WZ_AES"),

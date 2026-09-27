@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import stat
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
 from ziplet.cli.archive import open_archive
 from ziplet.cli.atomic import replacing
 from ziplet.cli.commands.helpers.collect import Collector, Entry
-from ziplet.cli.commands.helpers.command import add_command
+from ziplet.cli.commands.helpers.command import Subparsers, add_command
 from ziplet.cli.commands.helpers.copying.targets import PLAIN, Target, target_for_method
 from ziplet.cli.commands.helpers.create_report import (
     Added,
@@ -20,17 +19,20 @@ from ziplet.cli.commands.helpers.create_report import (
     report_dry_run,
 )
 from ziplet.cli.commands.helpers.encryption.options import (
+    EncryptionArgs,
     EncryptionOptions,
     add_encryption_options,
     build_plan,
 )
 from ziplet.cli.commands.helpers.encryption.plan import PlanAssignment, warn_if_weak
 from ziplet.cli.commands.helpers.output_options import (
+    OutputArgs,
     OutputOptions,
     add_output_options,
 )
 from ziplet.cli.commands.helpers.passwords.options import add_password_options
 from ziplet.cli.commands.helpers.progress import (
+    ProgressArgs,
     ProgressRenderer,
     StepReporter,
     add_progress_option,
@@ -52,7 +54,21 @@ from ziplet.zipfile.info import ZipInfo
 from ziplet.zipfile.shared import ZIP_MAX_COMMENT
 
 
-def _check_options(args: argparse.Namespace) -> bytes | None:
+class CreateArgs(OutputArgs, EncryptionArgs, ProgressArgs, Protocol):
+    archive: str
+    paths: list[str]
+    chdir: str | None
+    exclude: list[str]
+    symlinks: str
+    dry_run: bool
+    force: bool
+    append: bool
+    compression: str
+    level: int | None
+    comment: str | None
+
+
+def _check_options(args: CreateArgs) -> bytes | None:
     """Refuse bad options; the ``--comment`` comes back encoded."""
     if args.chdir is not None and not os.path.isdir(args.chdir):
         raise UsageError(f"-C: {printable(args.chdir)} is not a directory")
@@ -84,9 +100,7 @@ def _describe(zf: ZipFile, first: int) -> list[Added]:
     ]
 
 
-def _check_target(
-    args: argparse.Namespace, entries: list[Entry]
-) -> tuple[bool, list[Entry]]:
+def _check_target(args: CreateArgs, entries: list[Entry]) -> tuple[bool, list[Entry]]:
     """Refuse an archive that may not be written.
 
     Returns whether it is appended to, and the entries still to add: a
@@ -167,7 +181,7 @@ def _add_all(
         steps.finish(index, ok=True)
 
 
-def cmd_create(args: argparse.Namespace, ctx: Context) -> int:
+def cmd_create(args: CreateArgs, ctx: Context) -> int:
     comment = _check_options(args)
     encryption = EncryptionOptions.from_args(args)
     output = OutputOptions.from_args(args)
@@ -276,7 +290,7 @@ def _preview(
     entries: list[Entry], assignment: PlanAssignment, compression: str
 ) -> list[Planned]:
     """What ``--dry-run`` would add: name, kind and protection of each entry."""
-    planned = []
+    planned: list[Planned] = []
     for entry in entries:
         rule = assignment.chosen.get(entry.arcname)
         method = rule.method if rule else NO_ENCRYPTION
@@ -293,7 +307,7 @@ def _preview(
     return planned
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
     parser = add_command(
         subparsers,
         "create",
