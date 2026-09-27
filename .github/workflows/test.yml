@@ -59,7 +59,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Run ty check
-        run: uv run --group dev --with ty ty check
+        run: uv run --all-extras --group dev --with ty ty check
 
   basedpyright:
     name: basedpyright
@@ -78,7 +78,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Run basedpyright
-        run: uv run --group dev --with basedpyright basedpyright
+        run: uv run --all-extras --group dev --with basedpyright basedpyright
 
   mypy:
     name: mypy ${{ matrix.python-version }}
@@ -101,7 +101,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install project and dev dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Run mypy --strict
         run: uv run mypy --strict src tests
@@ -128,7 +128,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install project and dev dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Run pytest with coverage
         run: uv run pytest -v tests/unit --cov=src/ziplet --cov-report=term
@@ -155,7 +155,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install project and dev dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Run pytest with coverage
         run: uv run pytest -v tests/functional --cov=src/ziplet --cov-report=term
@@ -182,7 +182,7 @@ jobs:
         run: 7z i
 
       - name: Install project and dev dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Run 7-Zip interoperability tests
         run: uv run pytest -v -m windows tests/functional/test_7zip_interop.py tests/functional/cli/test_7zip_cli.py

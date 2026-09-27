@@ -49,7 +49,7 @@ def sz_methods(archive: Path, password: str | None = None) -> dict[str, str]:
             line.split(" = ", 1) for line in block.splitlines() if " = " in line
         )
         if fields.get("Folder") == "-":  # files only; directories are always stored
-            methods[fields["Path"]] = fields["Method"]
+            methods[Path(fields["Path"]).as_posix()] = fields["Method"]  # Windows: \
     return methods
 
 

@@ -51,7 +51,6 @@ dev = [
     "pytest-cov>=6.0.0",
     "pytest-sugar>=1.1.1",
     "pytest-xdist>=3.8.0",
-    "shtab>=1.12.1",
 ]
 
 [tool.ruff]
