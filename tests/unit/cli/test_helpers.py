@@ -12,16 +12,16 @@ from typing import cast
 import pytest
 
 from tests.unit.cli.conftest import new_context
-from ziplet.cli.commands.helpers.output_options import (
+from zipctl.cli.commands.helpers.output_options import (
     OutputArgs,
     OutputOptions,
     add_output_options,
 )
-from ziplet.cli.commands.helpers.progress import _columns, _shorten
-from ziplet.cli.commands.helpers.selection import glob_matcher
-from ziplet.cli.context import Context
-from ziplet.cli.errors import EXIT_USAGE, CliError, UsageError
-from ziplet.cli.output import count, format_table, human_size, printable, to_jsonable
+from zipctl.cli.commands.helpers.progress import _columns, _shorten
+from zipctl.cli.commands.helpers.selection import glob_matcher
+from zipctl.cli.context import Context
+from zipctl.cli.errors import EXIT_USAGE, CliError, UsageError
+from zipctl.cli.output import count, format_table, human_size, printable, to_jsonable
 
 
 @pytest.mark.parametrize(
@@ -152,7 +152,7 @@ def _output_args(args: argparse.Namespace) -> OutputArgs:
 def test_a_warning_carries_the_program_prefix() -> None:
     err = io.StringIO()
     Context(io.StringIO(), io.StringIO(), err, {}).warn("careful")
-    assert err.getvalue() == "ziplet: warning: careful\n"
+    assert err.getvalue() == "zipctl: warning: careful\n"
 
 
 def test_output_options_read_false_for_the_flags_a_command_lacks() -> None:

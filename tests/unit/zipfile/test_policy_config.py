@@ -12,8 +12,8 @@ from typing import cast
 
 import pytest
 
-import ziplet
-from ziplet import (
+import zipctl
+from zipctl import (
     ExtractPolicy,
     ExtractPolicyRule,
     OverwritePolicy,
@@ -24,10 +24,10 @@ from ziplet import (
     policy_to_json,
     policy_to_mapping,
 )
-from ziplet.cli.output import JsonValue
-from ziplet.zipfile import policy_config
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.validators import extension_chains
+from zipctl.cli.output import JsonValue
+from zipctl.zipfile import policy_config
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.validators import extension_chains
 
 
 def _issues(data: object) -> dict[str, str]:
@@ -356,7 +356,7 @@ def test_error_text_lists_each_issue_on_its_own_line() -> None:
     assert lines[0].startswith("max_entries: expected integer or null")
     assert len(lines) == 2
     assert isinstance(excinfo.value, ValueError)
-    assert all(isinstance(issue, ziplet.PolicyIssue) for issue in excinfo.value.issues)
+    assert all(isinstance(issue, zipctl.PolicyIssue) for issue in excinfo.value.issues)
 
 
 def test_a_valid_field_next_to_an_invalid_one_is_not_applied() -> None:
@@ -453,7 +453,7 @@ def test_default_policy_dump_is_a_valid_starting_document() -> None:
 
 def _archive(files: dict[str, bytes]) -> io.BytesIO:
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         for name, data in files.items():
             zf.writestr(name, data)
     return io.BytesIO(buffer.getvalue())
@@ -471,7 +471,7 @@ def test_loaded_policy_enforces_rules_during_extraction(tmp_path: Path) -> None:
         )
     )
     files = {"ok.txt": b"fine", "tool.EXE": b"x", "big.txt": b"y" * 50}
-    with ziplet.ZipFile(_archive(files)) as zf:
+    with zipctl.ZipFile(_archive(files)) as zf:
         result = zf.extractall(tmp_path, policy=policy)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["ok.txt"]
@@ -482,7 +482,7 @@ def test_loaded_and_hand_built_policies_are_interchangeable(tmp_path: Path) -> N
     built = ExtractPolicy(max_entries=1, on_violation=ViolationAction.SKIP)
     loaded = policy_from_json('{"max_entries": 1, "on_violation": "skip"}')
     assert loaded == built
-    with ziplet.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
+    with zipctl.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
         result = zf.extractall(tmp_path, policy=loaded)
     assert (result.extracted_count, result.skipped_count) == (1, 1)
 

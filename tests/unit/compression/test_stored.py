@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ziplet.compression import NoopCompressor, NoopDecompressor, stored
-from ziplet.compression.methods import ZIP_STORED, CompressionEntry
+from zipctl.compression import NoopCompressor, NoopDecompressor, stored
+from zipctl.compression.methods import ZIP_STORED, CompressionEntry
 
 
 class TestStoredCompressionEntry:

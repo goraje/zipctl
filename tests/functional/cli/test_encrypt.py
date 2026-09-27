@@ -1,4 +1,4 @@
-"""``ziplet encrypt``: an unencrypted archive in, an encrypted copy out."""
+"""``zipctl encrypt``: an unencrypted archive in, an encrypted copy out."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from typing_extensions import Unpack
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.rewrite_support import (
     FILES,
@@ -29,9 +29,9 @@ from tests.functional.cli.support import (
     write_archive,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
+from zipctl import ZipFile
 
-ENV = {"ZIPLET_PASSWORD": PASSWORD}
+ENV = {"ZIPCTL_PASSWORD": PASSWORD}
 needs_pty = pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
 NAMES = [name for name, _, _ in FILES]
 
@@ -51,7 +51,7 @@ def encrypt(
 
 def matches(cli: CliRunner, archive: Path, password: str) -> bool:
     result = cli(
-        "check-password", "--full", str(archive), env={"ZIPLET_PASSWORD": password}
+        "check-password", "--full", str(archive), env={"ZIPCTL_PASSWORD": password}
     )
     return result.returncode == 0
 
@@ -363,15 +363,15 @@ def test_an_already_encrypted_input_points_at_rewrite(
 ) -> None:
     make_source(
         workdir / "in.zip",
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
-        extra=ziplet.ZipFileExtra(wz_aes_nbits=256),
+        extra=zipctl.ZipFileExtra(wz_aes_nbits=256),
     )
     result = encrypt(cli, workdir, env=ENV)
     assert result.returncode == 1, result
     assert "6 members" in result.stderr
     assert "already encrypted" in result.stderr
-    assert "ziplet rewrite" in result.stderr
+    assert "zipctl rewrite" in result.stderr
     assert not (workdir / "out.zip").exists()
 
 

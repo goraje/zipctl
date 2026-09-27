@@ -10,15 +10,15 @@ from typing import NoReturn
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.rewrite_support import PASSWORD, PW
-from ziplet import ZipFile
-from ziplet.cli import main
-from ziplet.cli.commands.helpers.copying.copy import _can_copy_raw
-from ziplet.cli.commands.helpers.copying.targets import PLAIN, Target, target_for_method
-from ziplet.cli.methods import ENCRYPTION_METHODS
-from ziplet.compression import registry
-from ziplet.zipfile.info import ZipInfo
+from zipctl import ZipFile
+from zipctl.cli import main
+from zipctl.cli.commands.helpers.copying.copy import _can_copy_raw
+from zipctl.cli.commands.helpers.copying.targets import PLAIN, Target, target_for_method
+from zipctl.cli.methods import ENCRYPTION_METHODS
+from zipctl.compression import registry
+from zipctl.zipfile.info import ZipInfo
 
 Run = Callable[..., tuple[int, str, str]]
 _RANDOM = random.Random(11)
@@ -30,8 +30,8 @@ DATA = b" ".join(
 
 @pytest.fixture
 def run(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> Run:
-    monkeypatch.setenv("ZIPLET_PASSWORD", PASSWORD)
-    monkeypatch.setenv("ZIPLET_OLD_PASSWORD", PASSWORD)
+    monkeypatch.setenv("ZIPCTL_PASSWORD", PASSWORD)
+    monkeypatch.setenv("ZIPCTL_OLD_PASSWORD", PASSWORD)
 
     def go(*argv: str) -> tuple[int, str, str]:
         code = main(list(argv))
@@ -46,8 +46,8 @@ def source(workdir: Path) -> Path:
     """Level 9 deflate: recompressing at the default level would change the size."""
     path = workdir / "in.zip"
     with ZipFile(path, "w", compresslevel=9) as zf:
-        zf.writestr("a.txt", DATA, compress_type=ziplet.ZIP_DEFLATED)
-        zf.writestr("b.txt", DATA[:9000], compress_type=ziplet.ZIP_DEFLATED)
+        zf.writestr("a.txt", DATA, compress_type=zipctl.ZIP_DEFLATED)
+        zf.writestr("b.txt", DATA[:9000], compress_type=zipctl.ZIP_DEFLATED)
     return path
 
 
@@ -173,8 +173,8 @@ def test_a_zipcrypto_archive_can_be_moved_to_aes(run: Run, workdir: Path) -> Non
         zf.writestr(
             "a.txt",
             DATA,
-            compress_type=ziplet.ZIP_DEFLATED,
-            encryption=ziplet.ZIP_CRYPTO,
+            compress_type=zipctl.ZIP_DEFLATED,
+            encryption=zipctl.ZIP_CRYPTO,
             password=PW,
         )
     code, _, stderr = run(

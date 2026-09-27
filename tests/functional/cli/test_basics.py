@@ -14,7 +14,7 @@ import pytest
 
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.support import Result, clean_env, write_archive
-from ziplet.cli.parser import build_parser
+from zipctl.cli.parser import build_parser
 
 COMMANDS = ["list", "test", "inspect", "policy"]
 
@@ -46,7 +46,7 @@ def test_exit_codes_option_prints_the_table(cli: CliRunner) -> None:
 def test_every_command_prints_its_help(cli: CliRunner, command: str) -> None:
     result = cli(*command.split(), "--help")
     assert result.returncode == 0, result
-    assert result.stdout.startswith("usage: ziplet")
+    assert result.stdout.startswith("usage: zipctl")
 
 
 @pytest.mark.parametrize(
@@ -100,13 +100,13 @@ def test_encryption_options_sit_under_options_without_a_group_of_their_own(
 
 def test_no_help_mentions_the_password_environment_variable() -> None:
     for parser in _all_parsers(build_parser()):
-        assert "ZIPLET_PASSWORD" not in parser.format_help(), parser.prog
+        assert "ZIPCTL_PASSWORD" not in parser.format_help(), parser.prog
 
 
 def test_version_matches_the_installed_distribution(cli: CliRunner) -> None:
     result = cli("--version")
     assert result.returncode == 0, result
-    assert result.stdout == f"ziplet {version('ziplet')}\n"
+    assert result.stdout == f"zipctl {version('zipctl')}\n"
 
 
 @pytest.mark.parametrize(
@@ -128,7 +128,7 @@ def test_usage_errors_exit_2_with_usage_on_stderr(
     result = cli(*args)
     assert result.returncode == 2, result
     assert result.stdout == ""
-    assert "usage: ziplet" in result.stderr
+    assert "usage: zipctl" in result.stderr
     assert message in result.stderr
     assert "Traceback" not in result.stderr
 
@@ -144,16 +144,16 @@ def test_a_command_given_no_arguments_shows_its_help(
     result = cli(*command.split())
     assert result.returncode == 2, result
     assert result.stdout == ""
-    assert result.stderr.startswith(f"usage: ziplet {command}")
-    assert "ziplet: error" not in result.stderr
+    assert result.stderr.startswith(f"usage: zipctl {command}")
+    assert "zipctl: error" not in result.stderr
 
 
 @pytest.mark.parametrize(
     ("args", "prog"),
     [
-        (["list", "a.zip", "-q"], "ziplet list"),
-        (["policy", "show", "--bogus"], "ziplet policy show"),
-        (["policy", "validate", "a.json", "-q"], "ziplet policy validate"),
+        (["list", "a.zip", "-q"], "zipctl list"),
+        (["policy", "show", "--bogus"], "zipctl policy show"),
+        (["policy", "validate", "a.json", "-q"], "zipctl policy validate"),
     ],
 )
 def test_unrecognized_arguments_show_the_commands_own_usage_and_a_hint(
@@ -181,13 +181,13 @@ def test_print_completions_prints_a_script_that_knows_the_commands(
 def test_print_completions_without_shtab_names_the_extra(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from ziplet.cli import main
+    from zipctl.cli import main
 
     monkeypatch.setitem(sys.modules, "shtab", None)  # makes ``import shtab`` fail
     assert main(["--print-completions", "fish"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "ziplet[completion]" in captured.err
+    assert "zipctl[completion]" in captured.err
 
 
 def test_print_completions_refuses_an_unknown_shell(cli: CliRunner) -> None:
@@ -205,7 +205,7 @@ def test_option_abbreviations_are_refused(cli: CliRunner, workdir: Path) -> None
 
 
 def test_console_script_and_module_entry_point_agree(workdir: Path) -> None:
-    script = Path(sys.executable).with_name("ziplet")
+    script = Path(sys.executable).with_name("zipctl")
     if not script.exists():
         pytest.skip("console script is not installed in this environment")
     archive = write_archive(workdir / "a.zip", [("one.txt", b"1"), ("two.txt", b"2")])
@@ -219,14 +219,14 @@ def test_console_script_and_module_entry_point_agree(workdir: Path) -> None:
     listed = via_script("list", str(archive))
     assert listed.stdout == "one.txt\ntwo.txt\n"
     assert listed.returncode == 0
-    assert via_script("--version").stdout == f"ziplet {version('ziplet')}\n"
+    assert via_script("--version").stdout == f"zipctl {version('zipctl')}\n"
     assert via_script("list", str(workdir / "missing.zip")).returncode == 1
 
 
 def test_main_returns_the_exit_code_in_process(
     workdir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from ziplet.cli import main
+    from zipctl.cli import main
 
     archive = write_archive(workdir / "a.zip", [("a.txt", b"x")])
     assert main(["list", str(archive)]) == 0

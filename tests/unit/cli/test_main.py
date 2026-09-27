@@ -8,9 +8,9 @@ from collections.abc import Callable
 
 import pytest
 
-from ziplet.cli import main
-from ziplet.cli.context import Context
-from ziplet.cli.errors import CliError
+from zipctl.cli import main
+from zipctl.cli.context import Context
+from zipctl.cli.errors import CliError
 
 
 def _raising(error: BaseException) -> Callable[[argparse.Namespace, Context], int]:
@@ -21,25 +21,25 @@ def _raising(error: BaseException) -> Callable[[argparse.Namespace, Context], in
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
-    monkeypatch.setattr("ziplet.cli.commands.list.cmd_list", _raising(error))
+    monkeypatch.setattr("zipctl.cli.commands.list.cmd_list", _raising(error))
 
 
 def test_an_unexpected_error_is_named_without_a_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv("ZIPLET_DEBUG", raising=False)
+    monkeypatch.delenv("ZIPCTL_DEBUG", raising=False)
     _install(monkeypatch, TypeError("boom"))
     assert main(["list", "a.zip"]) == 1
     err = capsys.readouterr().err
-    assert "ziplet: error: unexpected TypeError: boom" in err
-    assert "ZIPLET_DEBUG=1" in err
+    assert "zipctl: error: unexpected TypeError: boom" in err
+    assert "ZIPCTL_DEBUG=1" in err
     assert "Traceback" not in err
 
 
 def test_debug_adds_the_traceback_and_the_hidden_cause(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("ZIPLET_DEBUG", "1")
+    monkeypatch.setenv("ZIPCTL_DEBUG", "1")
     try:
         try:
             raise OSError(13, "Permission denied", "x")
@@ -49,7 +49,7 @@ def test_debug_adds_the_traceback_and_the_hidden_cause(
         _install(monkeypatch, hidden)
     assert main(["list", "a.zip"]) == 1
     err = capsys.readouterr().err
-    assert "ziplet: error: cannot read x" in err
+    assert "zipctl: error: cannot read x" in err
     assert "Traceback" in err
     assert "PermissionError" in err
 
@@ -60,7 +60,7 @@ def test_json_failure_is_also_reported_on_standard_output(
     _install(monkeypatch, CliError("bad thing", 2, ("first", "second")))
     assert main(["list", "a.zip", "--json"]) == 2
     captured = capsys.readouterr()
-    assert "ziplet: error: bad thing" in captured.err
+    assert "zipctl: error: bad thing" in captured.err
     assert json.loads(captured.out) == {
         "ok": False,
         "error": "bad thing",

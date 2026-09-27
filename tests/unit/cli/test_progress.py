@@ -11,13 +11,13 @@ from collections.abc import Iterator
 import pytest
 from typing_extensions import override
 
-from ziplet.cli.commands.helpers.progress import (
+from zipctl.cli.commands.helpers.progress import (
     ProgressRenderer,
     StepReporter,
     progress_renderer,
 )
-from ziplet.zipfile.extract import MemberStatus
-from ziplet.zipfile.progress import ProgressEvent, ProgressPhase
+from zipctl.zipfile.extract import MemberStatus
+from zipctl.zipfile.progress import ProgressEvent, ProgressPhase
 
 HAS_PTY = sys.platform != "win32"
 

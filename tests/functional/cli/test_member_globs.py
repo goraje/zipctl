@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import PASSWORD, write_archive
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def test_test_asks_for_passwords_only_for_the_selected_members(
         zf.writestr(
             "secret.txt",
             b"s",
-            encryption=ziplet.WZ_AES,
+            encryption=zipctl.WZ_AES,
             password=PASSWORD.encode(),
         )
     assert cli("test", str(path), "plain.txt").returncode == 0

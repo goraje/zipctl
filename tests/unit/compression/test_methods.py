@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from typing_extensions import override
 
-from ziplet.compression.methods import (
+from zipctl.compression.methods import (
     CompressionEntry,
     CompressorBase,
     DecompressorBase,

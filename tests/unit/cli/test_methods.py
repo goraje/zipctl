@@ -4,25 +4,25 @@ from __future__ import annotations
 
 import io
 
-import ziplet
-from ziplet.cli.methods import ENCRYPTION_METHODS, NO_ENCRYPTION, method_of
-from ziplet.zipfile.info import ZipInfo
+import zipctl
+from zipctl.cli.methods import ENCRYPTION_METHODS, NO_ENCRYPTION, method_of
+from zipctl.zipfile.info import ZipInfo
 
 
 def _protected(method: str) -> ZipInfo:
     chosen = ENCRYPTION_METHODS[method]
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         zf.writestr(
             "a.txt",
             b"data",
             encryption=chosen.scheme,
             password=b"pw" if chosen.is_encrypted else None,
-            extra=ziplet.ZipFileExtra(wz_aes_nbits=chosen.aes_bits)
+            extra=zipctl.ZipFileExtra(wz_aes_nbits=chosen.aes_bits)
             if chosen.is_aes
             else None,
         )
-    with ziplet.ZipFile(buffer) as zf:
+    with zipctl.ZipFile(buffer) as zf:
         return zf.infolist()[0]
 
 

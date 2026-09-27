@@ -6,21 +6,21 @@ from pathlib import Path
 
 import pytest
 
-from ziplet.cryptography import (
+from zipctl.cryptography import (
     WZ_AES,
     WZ_AES_V1,
     WZ_AES_V2,
     ZIP_CRYPTO,
     wz_aes_stores_crc,
 )
-from ziplet.exceptions import BadZipFile
-from ziplet.zipfile.info import (
+from zipctl.exceptions import BadZipFile
+from zipctl.zipfile.info import (
     WzAesExtra,
     ZipInfo,
     _Extra,
     _sanitize_filename,
 )
-from ziplet.zipfile.shared import (
+from zipctl.zipfile.shared import (
     MASK_ENCRYPTED,
     MASK_STRONG_ENCRYPTION,
     MASK_USE_DATA_DESCRIPTOR,

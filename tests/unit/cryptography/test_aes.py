@@ -5,7 +5,7 @@ import os
 import pytest
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from ziplet.cryptography.aes import (
+from zipctl.cryptography.aes import (
     WZ_AES_V1,
     WZ_AES_V2,
     AesZipDecrypter,
@@ -13,8 +13,8 @@ from ziplet.cryptography.aes import (
     _AesCtrWithLittleEndian,
     _counter_blocks,
 )
-from ziplet.exceptions import BadZipFile
-from ziplet.zipfile.info import WzAesExtra, ZipInfo
+from zipctl.exceptions import BadZipFile
+from zipctl.zipfile.info import WzAesExtra, ZipInfo
 
 
 def _make_zinfo(strength: int | None = 3, filename: str = "test.txt") -> ZipInfo:

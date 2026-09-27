@@ -1,12 +1,12 @@
-"""Functional tests â€” ziplet â†” 7-Zip interoperability.
+"""Functional tests â€” zipctl â†” 7-Zip interoperability.
 
 All tests are skipped automatically when 7-Zip (``7z`` or ``7zz``) is not on
 PATH.  The Windows CI job selects them with ``-m windows``; they also run
 locally wherever 7-Zip is installed.  Covered: AES-128/192/256, ZipCrypto,
 seekable and non-seekable output, multi-megabyte payloads, and password checks.
 
-Direction A: ziplet writes a ZIP â†’ 7-Zip validates / extracts it.
-Direction B: 7-Zip writes a ZIP â†’ ziplet reads it.
+Direction A: zipctl writes a ZIP â†’ 7-Zip validates / extracts it.
+Direction B: 7-Zip writes a ZIP â†’ zipctl reads it.
 Additional:  edge-case functional scenarios that span both sides.
 """
 
@@ -22,8 +22,8 @@ from typing import IO, cast
 
 import pytest
 
-import ziplet
-from ziplet import PasswordRequired, PasswordStatus, ZipFile, ZipFileExtra
+import zipctl
+from zipctl import PasswordRequired, PasswordStatus, ZipFile, ZipFileExtra
 
 # ---------------------------------------------------------------------------
 # 7-Zip location + module-level skip
@@ -47,7 +47,7 @@ PASSWORD = b"Cefzuj-hetveg-xifve5"
 _PWD_STR = PASSWORD.decode()
 
 # Small payload used when compression method does not matter
-CONTENT = b"Hello from ziplet functional tests."
+CONTENT = b"Hello from zipctl functional tests."
 
 # Larger, compressible payload used to ensure 7z actually applies Deflate
 # (7z silently falls back to Store for tiny files even when -mm=Deflate is passed)
@@ -111,17 +111,17 @@ def _sz_create_encrypted(
 
 
 # ===========================================================================
-# Direction A: ziplet writes â†’ 7-Zip validates / extracts
+# Direction A: zipctl writes â†’ 7-Zip validates / extracts
 # ===========================================================================
 
 
 class TestPyWrites7zValidates:
-    """ziplet creates archives; 7-Zip must accept them."""
+    """zipctl creates archives; 7-Zip must accept them."""
 
     def test_aes256_bzip2(self, tmp_path: Path) -> None:
         zp = tmp_path / "a3.zip"
         with ZipFile(
-            zp, "w", compression=ziplet.ZIP_BZIP2, encryption=ziplet.WZ_AES
+            zp, "w", compression=zipctl.ZIP_BZIP2, encryption=zipctl.WZ_AES
         ) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("file.txt", LARGE_CONTENT)
@@ -130,7 +130,7 @@ class TestPyWrites7zValidates:
     def test_aes256_lzma(self, tmp_path: Path) -> None:
         zp = tmp_path / "a4.zip"
         with ZipFile(
-            zp, "w", compression=ziplet.ZIP_LZMA, encryption=ziplet.WZ_AES
+            zp, "w", compression=zipctl.ZIP_LZMA, encryption=zipctl.WZ_AES
         ) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("file.txt", LARGE_CONTENT)
@@ -140,7 +140,7 @@ class TestPyWrites7zValidates:
         """force_wz_aes_version=1 â†’ 7-Zip lists AES-256 and passes integrity check."""
         zp = tmp_path / "a7.zip"
         x = ZipFileExtra(force_wz_aes_version=1)
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES, extra=x) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES, extra=x) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("f.txt", CONTENT * 5)
         meta = _sz_list_metadata(zp)
@@ -151,7 +151,7 @@ class TestPyWrites7zValidates:
         """force_wz_aes_version=2 (zero-CRC) â†’ 7-Zip lists AES-256 and passes."""
         zp = tmp_path / "a8.zip"
         x = ZipFileExtra(force_wz_aes_version=2)
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES, extra=x) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES, extra=x) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("f.txt", CONTENT * 10)
         meta = _sz_list_metadata(zp)
@@ -159,7 +159,7 @@ class TestPyWrites7zValidates:
         assert _sz_test(zp, _PWD_STR) == 0
 
     def test_no_encryption_baseline(self, tmp_path: Path) -> None:
-        """Unencrypted archive written by ziplet passes 7-Zip integrity check."""
+        """Unencrypted archive written by zipctl passes 7-Zip integrity check."""
         zp = tmp_path / "a9.zip"
         with ZipFile(zp, "w") as zf:
             zf.writestr("f.txt", CONTENT)
@@ -167,15 +167,15 @@ class TestPyWrites7zValidates:
 
 
 # ===========================================================================
-# Direction B: 7-Zip writes â†’ ziplet reads
+# Direction B: 7-Zip writes â†’ zipctl reads
 # ===========================================================================
 
 
 class TestSevenZWritesPyReads:
-    """7-Zip creates archives; ziplet must read them correctly."""
+    """7-Zip creates archives; zipctl must read them correctly."""
 
     def test_7z_zipcrypto(self, tmp_path: Path) -> None:
-        """7-Zip writes ZipCrypto; ziplet auto-detects and decrypts."""
+        """7-Zip writes ZipCrypto; zipctl auto-detects and decrypts."""
         zp = tmp_path / "b3.zip"
         _sz_create_encrypted(
             zp, CONTENT, "secret.txt", method="ZipCrypto", tmp=tmp_path
@@ -210,7 +210,7 @@ class TestSevenZWritesPyReads:
                 assert zf.read(name) == data
 
     def test_7z_no_encryption(self, tmp_path: Path) -> None:
-        """7-Zip writes a plain (unencrypted) ZIP; ziplet reads it."""
+        """7-Zip writes a plain (unencrypted) ZIP; zipctl reads it."""
         zp = tmp_path / "b5.zip"
         (tmp_path / "plain.txt").write_bytes(CONTENT)
         result = _sz("a", "-tzip", str(zp), str(tmp_path / "plain.txt"))
@@ -226,13 +226,13 @@ class TestSevenZWritesPyReads:
 
 class TestAdditional:
     def test_unicode_filename_has_utf8_flag(self, tmp_path: Path) -> None:
-        """Non-ASCII filenames written by ziplet have the UTF-8 flag set.
+        """Non-ASCII filenames written by zipctl have the UTF-8 flag set.
 
         7-Zip's detailed listing (l -slt) should report 'UTF8' in the
         Characteristics field.
         """
         zp = tmp_path / "f4.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("hĂ©llo_wĂ¶rld.txt", CONTENT)
 
@@ -247,7 +247,7 @@ class TestAdditional:
             "nested/deep/beta.bin": b"beta-bytes",
             "root.txt": b"root-data",
         }
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             for name, data in expected.items():
                 zf.writestr(name, data)
@@ -263,7 +263,7 @@ class TestAdditional:
     def test_multi_file_with_zero_byte_entry(self, tmp_path: Path) -> None:
         """A mixed archive with an empty file remains valid for both tools."""
         zp = tmp_path / "f7.zip"
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("payload.bin", b"payload")
             zf.writestr("empty.dat", b"")
@@ -278,14 +278,14 @@ class TestAdditional:
         """Per-entry compression methods can be mixed in one archive."""
         zp = tmp_path / "f8.zip"
         methods = {
-            "stored.txt": ziplet.ZIP_STORED,
-            "deflated.txt": ziplet.ZIP_DEFLATED,
-            "bzip2.txt": ziplet.ZIP_BZIP2,
-            "lzma.txt": ziplet.ZIP_LZMA,
+            "stored.txt": zipctl.ZIP_STORED,
+            "deflated.txt": zipctl.ZIP_DEFLATED,
+            "bzip2.txt": zipctl.ZIP_BZIP2,
+            "lzma.txt": zipctl.ZIP_LZMA,
         }
         payload = b"compressible-payload-" * 256
 
-        with ZipFile(zp, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(zp, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             for name, method in methods.items():
                 zf.writestr(name, payload, compress_type=method)
@@ -351,8 +351,8 @@ class _NonSeekableFile:
         raise io.UnsupportedOperation("seek")
 
 
-STORED = ziplet.ZIP_STORED
-DEFLATED = ziplet.ZIP_DEFLATED
+STORED = zipctl.ZIP_STORED
+DEFLATED = zipctl.ZIP_DEFLATED
 SZ_METHOD = {STORED: "Copy", DEFLATED: "Deflate"}
 
 
@@ -361,15 +361,15 @@ class TestAesKeySizes:
 
     @pytest.mark.parametrize("compression", [STORED, DEFLATED])
     @pytest.mark.parametrize("bits", [128, 192, 256])
-    def test_ziplet_writes_7z_verifies_and_extracts(
+    def test_zipctl_writes_7z_verifies_and_extracts(
         self, tmp_path: Path, bits: int, compression: int
     ) -> None:
-        zp = tmp_path / "ziplet.zip"
+        zp = tmp_path / "zipctl.zip"
         with ZipFile(
             zp,
             "w",
             compression=compression,
-            encryption=ziplet.WZ_AES,
+            encryption=zipctl.WZ_AES,
             extra=ZipFileExtra(wz_aes_nbits=bits),
         ) as zf:
             zf.setpassword(PASSWORD)
@@ -383,7 +383,7 @@ class TestAesKeySizes:
 
     @pytest.mark.parametrize("compression", [STORED, DEFLATED])
     @pytest.mark.parametrize("bits", [128, 192, 256])
-    def test_7z_writes_ziplet_reads(
+    def test_7z_writes_zipctl_reads(
         self, tmp_path: Path, bits: int, compression: int
     ) -> None:
         zp = tmp_path / "sevenzip.zip"
@@ -403,14 +403,14 @@ class TestAesKeySizes:
             assert zf.testzip() is None
 
 
-class TestZipCryptoWrittenByZiplet:
-    """Legacy ZipCrypto archives written by ziplet are accepted by 7-Zip."""
+class TestZipCryptoWrittenByZipctl:
+    """Legacy ZipCrypto archives written by zipctl are accepted by 7-Zip."""
 
     @pytest.mark.parametrize("compression", [STORED, DEFLATED])
     def test_7z_verifies_and_extracts(self, tmp_path: Path, compression: int) -> None:
         zp = tmp_path / "zipcrypto.zip"
         with ZipFile(
-            zp, "w", compression=compression, encryption=ziplet.ZIP_CRYPTO
+            zp, "w", compression=compression, encryption=zipctl.ZIP_CRYPTO
         ) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("payload.txt", LARGE_CONTENT)
@@ -423,15 +423,15 @@ class TestZipCryptoWrittenByZiplet:
 
 
 NON_SEEKABLE_CASES = {
-    "aes256-v2": (ziplet.WZ_AES, ZipFileExtra(force_wz_aes_version=2)),
-    "aes256-v1": (ziplet.WZ_AES, ZipFileExtra(force_wz_aes_version=1)),
-    "aes128-v2": (ziplet.WZ_AES, ZipFileExtra(wz_aes_nbits=128)),
-    "zipcrypto": (ziplet.ZIP_CRYPTO, None),
+    "aes256-v2": (zipctl.WZ_AES, ZipFileExtra(force_wz_aes_version=2)),
+    "aes256-v1": (zipctl.WZ_AES, ZipFileExtra(force_wz_aes_version=1)),
+    "aes128-v2": (zipctl.WZ_AES, ZipFileExtra(wz_aes_nbits=128)),
+    "zipcrypto": (zipctl.ZIP_CRYPTO, None),
 }
 
 
 class TestNonSeekableOutput:
-    """Streaming (data-descriptor) output is accepted by 7-Zip and ziplet."""
+    """Streaming (data-descriptor) output is accepted by 7-Zip and zipctl."""
 
     @pytest.mark.parametrize("compression", [STORED, DEFLATED])
     @pytest.mark.parametrize("case", list(NON_SEEKABLE_CASES))
@@ -465,10 +465,10 @@ class TestNonSeekableOutput:
 
 
 LARGE_CASES = {
-    "aes256-stored": (ziplet.WZ_AES, "AES256", STORED),
-    "aes256-deflate": (ziplet.WZ_AES, "AES256", DEFLATED),
-    "aes128-deflate": (ziplet.WZ_AES, "AES128", DEFLATED),
-    "zipcrypto-deflate": (ziplet.ZIP_CRYPTO, "ZipCrypto", DEFLATED),
+    "aes256-stored": (zipctl.WZ_AES, "AES256", STORED),
+    "aes256-deflate": (zipctl.WZ_AES, "AES256", DEFLATED),
+    "aes128-deflate": (zipctl.WZ_AES, "AES128", DEFLATED),
+    "zipcrypto-deflate": (zipctl.ZIP_CRYPTO, "ZipCrypto", DEFLATED),
 }
 
 
@@ -476,7 +476,7 @@ class TestLargePayloads:
     """Multi-megabyte payloads cross many read/decrypt chunk boundaries."""
 
     @pytest.mark.parametrize("case", list(LARGE_CASES))
-    def test_ziplet_writes_7z_reads(self, tmp_path: Path, case: str) -> None:
+    def test_zipctl_writes_7z_reads(self, tmp_path: Path, case: str) -> None:
         encryption, _, compression = LARGE_CASES[case]
         payload = _mixed_payload()
         zp = tmp_path / "large.zip"
@@ -492,7 +492,7 @@ class TestLargePayloads:
         )
 
     @pytest.mark.parametrize("case", list(LARGE_CASES))
-    def test_7z_writes_ziplet_reads(self, tmp_path: Path, case: str) -> None:
+    def test_7z_writes_zipctl_reads(self, tmp_path: Path, case: str) -> None:
         _, method, compression = LARGE_CASES[case]
         payload = _mixed_payload()
         zp = tmp_path / "large.zip"
@@ -516,7 +516,7 @@ def _written_by_sevenzip(tmp_path: Path, method: str) -> Path:
     return zp
 
 
-def _written_by_ziplet(tmp_path: Path, encryption: str) -> Path:
+def _written_by_zipctl(tmp_path: Path, encryption: str) -> Path:
     zp = tmp_path / f"py-{encryption}.zip"
     with ZipFile(zp, "w", encryption=encryption) as zf:
         zf.setpassword(PASSWORD)
@@ -540,7 +540,7 @@ class TestPasswordChecks:
         tool, _, kind = cast("str", request.param).partition("-")
         if tool == "7z":
             return _written_by_sevenzip(tmp_path, kind)
-        return _written_by_ziplet(tmp_path, kind)
+        return _written_by_zipctl(tmp_path, kind)
 
     def test_correct_password_is_accepted(self, archive: Path) -> None:
         with ZipFile(archive) as zf:

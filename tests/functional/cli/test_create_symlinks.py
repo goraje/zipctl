@@ -1,4 +1,4 @@
-"""``ziplet create --symlinks {follow,store,skip}``."""
+"""``zipctl create --symlinks {follow,store,skip}``."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import PASSWORD
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="needs symbolic links")
 
@@ -117,7 +117,7 @@ def test_a_link_named_on_the_command_line_follows_the_mode(
 def test_stored_links_are_encrypted_like_files(cli: CliRunner, workdir: Path) -> None:
     result = cli(
         "create", "out.zip", "t", "--symlinks", "store", "--encryption", "aes256",
-        env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir,
+        env={"ZIPCTL_PASSWORD": PASSWORD}, cwd=workdir,
     )  # fmt: skip
     assert result.returncode == 0, result
     with ZipFile(workdir / "out.zip") as zf:
@@ -126,7 +126,7 @@ def test_stored_links_are_encrypted_like_files(cli: CliRunner, workdir: Path) ->
         assert stat.S_ISLNK(link.external_attr >> 16)
         assert zf.read(link, pwd=PASSWORD.encode()) == b"file.txt"
         assert zf.getinfo("t/file.txt").is_encrypted
-    checked = cli("test", "out.zip", env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir)
+    checked = cli("test", "out.zip", env={"ZIPCTL_PASSWORD": PASSWORD}, cwd=workdir)
     assert checked.returncode == 0, checked
 
 
@@ -153,7 +153,7 @@ def test_a_protect_style_rule_can_cover_only_links(
 def test_dry_run_shows_the_protection_of_links(cli: CliRunner, workdir: Path) -> None:
     result = cli(
         "create", "out.zip", "t", "--symlinks", "store", "-n", "--encryption", "aes256",
-        env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir,
+        env={"ZIPCTL_PASSWORD": PASSWORD}, cwd=workdir,
     )  # fmt: skip
     assert result.returncode == 0, result
     assert "Would add: t/flink (symlink, AES-256)" in result.stdout.splitlines()

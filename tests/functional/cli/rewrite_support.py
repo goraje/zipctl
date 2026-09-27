@@ -7,9 +7,9 @@ import struct
 from pathlib import Path
 from typing import NamedTuple
 
-import ziplet
-from ziplet import ZipFile
-from ziplet.zipfile.info import ZipInfo
+import zipctl
+from zipctl import ZipFile
+from zipctl.zipfile.info import ZipInfo
 
 PASSWORD = "correct horse battery"
 PW = PASSWORD.encode()
@@ -20,16 +20,16 @@ _RANDOM = random.Random(1234)
 
 # name, method, data: a mix of compression methods, modes, dates and comments
 FILES: list[tuple[str, int, bytes]] = [
-    ("docs/readme.txt", ziplet.ZIP_DEFLATED, b"read me\n" * 40),
+    ("docs/readme.txt", zipctl.ZIP_DEFLATED, b"read me\n" * 40),
     (
         "docs/data.bin",
-        ziplet.ZIP_BZIP2,
+        zipctl.ZIP_BZIP2,
         bytes(_RANDOM.randrange(256) for _ in range(5000)),
     ),
-    ("notes/ünïcode ✓.txt", ziplet.ZIP_LZMA, "grüße".encode() * 30),
-    ("empty.txt", ziplet.ZIP_STORED, b""),
-    ("run.sh", ziplet.ZIP_STORED, b"#!/bin/sh\necho hi\n"),
-    ("link", ziplet.ZIP_STORED, b"docs/readme.txt"),
+    ("notes/ünïcode ✓.txt", zipctl.ZIP_LZMA, "grüße".encode() * 30),
+    ("empty.txt", zipctl.ZIP_STORED, b""),
+    ("run.sh", zipctl.ZIP_STORED, b"#!/bin/sh\necho hi\n"),
+    ("link", zipctl.ZIP_STORED, b"docs/readme.txt"),
 ]
 _MODES = {"run.sh": 0o100755, "link": 0o120777}
 DIRECTORIES = ["docs/", "notes/"]
@@ -60,7 +60,7 @@ def make_source(
     *,
     encryption: str | None = None,
     password: bytes | None = None,
-    extra: ziplet.ZipFileExtra | None = None,
+    extra: zipctl.ZipFileExtra | None = None,
 ) -> Path:
     """Write the sample archive, every file protected the same way."""
     with ZipFile(path, "w") as zf:
@@ -84,18 +84,18 @@ def make_source(
 
 def make_mixed(path: Path) -> Path:
     """Four members: two passwords, three schemes, one plain."""
-    aes = ziplet.WZ_AES
+    aes = zipctl.WZ_AES
     with ZipFile(path, "w") as zf:
         zf.writestr(
             "a.txt", b"alpha", encryption=aes, password=PW,
-            extra=ziplet.ZipFileExtra(wz_aes_nbits=256),
+            extra=zipctl.ZipFileExtra(wz_aes_nbits=256),
         )  # fmt: skip
         zf.writestr(
             "b.txt", b"bravo", encryption=aes, password=OTHER_PW,
-            extra=ziplet.ZipFileExtra(wz_aes_nbits=192, force_wz_aes_version=1),
+            extra=zipctl.ZipFileExtra(wz_aes_nbits=192, force_wz_aes_version=1),
         )  # fmt: skip
         zf.writestr("c.txt", b"charlie")
-        zf.writestr("d.txt", b"delta", encryption=ziplet.ZIP_CRYPTO, password=PW)
+        zf.writestr("d.txt", b"delta", encryption=zipctl.ZIP_CRYPTO, password=PW)
     return path
 
 
@@ -163,4 +163,4 @@ def schemes(path: Path) -> dict[str, str]:
 
 def leftovers(directory: Path) -> list[str]:
     """Scratch files a run should never leave behind."""
-    return sorted(p.name for p in directory.glob(".ziplet-*"))
+    return sorted(p.name for p in directory.glob(".zipctl-*"))

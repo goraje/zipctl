@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
-from ziplet import MemberStatus, ProgressEvent, ProgressPhase
-from ziplet.zipfile import materialize, progress
-from ziplet.zipfile.info import ZipInfo
+import zipctl
+from zipctl import MemberStatus, ProgressEvent, ProgressPhase
+from zipctl.zipfile import materialize, progress
+from zipctl.zipfile.info import ZipInfo
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="requires symlinks")
 
@@ -22,7 +22,7 @@ BIG = 1_000_000
 
 def _archive(files: dict[str, bytes]) -> io.BytesIO:
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         for name, data in files.items():
             zf.writestr(name, data)
     return io.BytesIO(buffer.getvalue())
@@ -40,7 +40,7 @@ def small_step(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_extractall_reports_start_and_finish_for_every_member(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
     files = {"a.txt": b"x" * 10, "d/": b"", "b.txt": b"y" * 20}
-    with ziplet.ZipFile(_archive(files)) as zf:
+    with zipctl.ZipFile(_archive(files)) as zf:
         zf.extractall(tmp_path, progress=events.append)
 
     assert _phases(events) == [
@@ -63,7 +63,7 @@ def test_extractall_reports_start_and_finish_for_every_member(tmp_path: Path) ->
 
 def test_extract_single_member_reports_one_member(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"a.txt": b"abc", "b.txt": b"defg"})) as zf:
+    with zipctl.ZipFile(_archive({"a.txt": b"abc", "b.txt": b"defg"})) as zf:
         zf.extract("b.txt", tmp_path, progress=events.append)
 
     assert _phases(events) == [(START, "b.txt"), (FINISH, "b.txt")]
@@ -74,7 +74,7 @@ def test_extract_single_member_reports_one_member(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("small_step")
 def test_large_member_reports_byte_progress(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"big.bin": b"z" * BIG})) as zf:
+    with zipctl.ZipFile(_archive({"big.bin": b"z" * BIG})) as zf:
         zf.extractall(tmp_path, progress=events.append)
 
     updates = [e for e in events if e.phase == PROGRESS]
@@ -96,11 +96,11 @@ def test_symlinks_and_directories_have_no_byte_progress(
     link = ZipInfo("link")
     link.external_attr = (stat.S_IFLNK | 0o777) << 16
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         zf.writestr("dir/", b"")
         zf.writestr(link, b"target.txt")
     events: list[ProgressEvent] = []
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         zf.extractall(tmp_path, progress=events.append)
     assert {e.phase for e in events} == {START, FINISH}
 
@@ -112,15 +112,15 @@ def test_progress_none_installs_no_wrapper(
         raise AssertionError("progress wrapper used without a callback")
 
     monkeypatch.setattr(materialize, "_ProgressWriter", forbidden)
-    with ziplet.ZipFile(_archive({"a.txt": b"abc"})) as zf:
+    with zipctl.ZipFile(_archive({"a.txt": b"abc"})) as zf:
         zf.extractall(tmp_path)
-        zf.extractall(tmp_path / "policy", policy=ziplet.ExtractPolicy())
+        zf.extractall(tmp_path / "policy", policy=zipctl.ExtractPolicy())
     assert (tmp_path / "policy" / "a.txt").read_bytes() == b"abc"
 
 
 def test_unknown_member_fails_before_anything_is_extracted(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"a.txt": b"abc"})) as zf:
+    with zipctl.ZipFile(_archive({"a.txt": b"abc"})) as zf:
         with pytest.raises(KeyError):
             zf.extractall(tmp_path, ["a.txt", "missing.txt"], progress=events.append)
     assert events == []
@@ -133,8 +133,8 @@ def test_unknown_member_fails_before_anything_is_extracted(tmp_path: Path) -> No
 def test_policy_finish_carries_each_member_status(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
     files = {"ok.txt": b"fine", "../escape.txt": b"nope", "also.txt": b"fine"}
-    policy = ziplet.ExtractPolicy(on_violation=ziplet.ViolationAction.SKIP)
-    with ziplet.ZipFile(_archive(files)) as zf:
+    policy = zipctl.ExtractPolicy(on_violation=zipctl.ViolationAction.SKIP)
+    with zipctl.ZipFile(_archive(files)) as zf:
         zf.extractall(tmp_path / "out", policy=policy, progress=events.append)
 
     finishes = [e for e in events if e.phase == FINISH]
@@ -148,18 +148,18 @@ def test_policy_finish_carries_each_member_status(tmp_path: Path) -> None:
 
 def test_policy_failed_and_previewed_statuses(tmp_path: Path) -> None:
     failed: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"../escape.txt": b"nope"})) as zf:
-        with pytest.raises(ziplet.ExtractionError):
+    with zipctl.ZipFile(_archive({"../escape.txt": b"nope"})) as zf:
+        with pytest.raises(zipctl.ExtractionError):
             zf.extractall(
-                tmp_path / "a", policy=ziplet.ExtractPolicy(), progress=failed.append
+                tmp_path / "a", policy=zipctl.ExtractPolicy(), progress=failed.append
             )
     assert failed[-1].status == MemberStatus.FAILED
 
     previewed: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"a.txt": b"abc"})) as zf:
+    with zipctl.ZipFile(_archive({"a.txt": b"abc"})) as zf:
         zf.extractall(
             tmp_path / "b",
-            policy=ziplet.ExtractPolicy(preview_only=True),
+            policy=zipctl.ExtractPolicy(preview_only=True),
             progress=previewed.append,
         )
     assert previewed[-1].status == MemberStatus.PREVIEWED
@@ -168,10 +168,10 @@ def test_policy_failed_and_previewed_statuses(tmp_path: Path) -> None:
 
 def test_entry_limit_skip_reports_skipped_members(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
-    policy = ziplet.ExtractPolicy(
-        max_entries=1, on_violation=ziplet.ViolationAction.SKIP
+    policy = zipctl.ExtractPolicy(
+        max_entries=1, on_violation=zipctl.ViolationAction.SKIP
     )
-    with ziplet.ZipFile(_archive({"a": b"1", "b": b"2", "c": b"3"})) as zf:
+    with zipctl.ZipFile(_archive({"a": b"1", "b": b"2", "c": b"3"})) as zf:
         zf.extractall(tmp_path, policy=policy, progress=events.append)
     finishes = [e for e in events if e.phase == FINISH]
     assert [e.status for e in finishes] == [
@@ -183,11 +183,11 @@ def test_entry_limit_skip_reports_skipped_members(tmp_path: Path) -> None:
 
 def test_archive_rejected_by_entry_limit_emits_no_events(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
-    with ziplet.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
-        with pytest.raises(ziplet.ExtractionError):
+    with zipctl.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
+        with pytest.raises(zipctl.ExtractionError):
             zf.extractall(
                 tmp_path,
-                policy=ziplet.ExtractPolicy(max_entries=1),
+                policy=zipctl.ExtractPolicy(max_entries=1),
                 progress=events.append,
             )
     assert events == []
@@ -214,8 +214,8 @@ def _cancel_when(
 def test_callback_can_cancel_between_members(tmp_path: Path, use_policy: bool) -> None:
     error = Cancelled("stop")
     callback = _cancel_when(START, "second.txt", error)
-    policy = ziplet.ExtractPolicy() if use_policy else None
-    with ziplet.ZipFile(_archive({"first.txt": b"1", "second.txt": b"2"})) as zf:
+    policy = zipctl.ExtractPolicy() if use_policy else None
+    with zipctl.ZipFile(_archive({"first.txt": b"1", "second.txt": b"2"})) as zf:
         with pytest.raises(Cancelled) as excinfo:
             zf.extractall(tmp_path, policy=policy, progress=callback)
     assert excinfo.value is error
@@ -231,12 +231,12 @@ def test_callback_error_during_byte_progress_cancels_cleanly(
 ) -> None:
     """Errors the policy path would report as member failures must still cancel."""
     callback = _cancel_when(PROGRESS, "big.bin", error)
-    policy = ziplet.ExtractPolicy() if use_policy else None
+    policy = zipctl.ExtractPolicy() if use_policy else None
     files = {"first.txt": b"1", "big.bin": b"z" * BIG}
-    with ziplet.ZipFile(_archive(files)) as zf:
+    with zipctl.ZipFile(_archive(files)) as zf:
         with pytest.raises(type(error)) as excinfo:
             zf.extractall(tmp_path, policy=policy, progress=callback)
     assert excinfo.value is error
     assert (tmp_path / "first.txt").exists()
     assert not (tmp_path / "big.bin").exists()
-    assert not list(tmp_path.glob(".ziplet-*"))
+    assert not list(tmp_path.glob(".zipctl-*"))

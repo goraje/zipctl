@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
-from ziplet import ZipFile
-from ziplet.compression import registry as _comp_registry
-from ziplet.zipfile.shared import MASK_COMPRESSED_PATCH, MASK_STRONG_ENCRYPTION
+import zipctl
+from zipctl import ZipFile
+from zipctl.compression import registry as _comp_registry
+from zipctl.zipfile.shared import MASK_COMPRESSED_PATCH, MASK_STRONG_ENCRYPTION
 
 PASSWORD = b"Cefzuj-hetveg-xifve5"
 _TOTALLY_UNKNOWN = 999
@@ -44,7 +44,7 @@ class TestZipFileOpenReadBranches:
         tmp_path: Path,
     ) -> None:
         path = tmp_path / "enc.zip"
-        with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("secret.txt", b"data")
 
@@ -134,9 +134,9 @@ class TestZipFileCompressionValidation:
     @pytest.mark.parametrize(
         ("method", "module_name"),
         [
-            (ziplet.ZIP_DEFLATED, "zlib"),
-            (ziplet.ZIP_BZIP2, "bz2"),
-            (ziplet.ZIP_LZMA, "lzma"),
+            (zipctl.ZIP_DEFLATED, "zlib"),
+            (zipctl.ZIP_BZIP2, "bz2"),
+            (zipctl.ZIP_LZMA, "lzma"),
         ],
     )
     def test_patched_method_unavailable_raises_runtime_error(

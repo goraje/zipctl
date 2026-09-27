@@ -1,4 +1,4 @@
-"""The ziplet CLI and 7-Zip: 7-Zip must accept and read what the CLI writes.
+"""The zipctl CLI and 7-Zip: 7-Zip must accept and read what the CLI writes.
 
 Skipped when 7-Zip (``7z`` or ``7zz``) is not on PATH; the Windows CI job selects
 these with ``-m windows``.
@@ -29,7 +29,7 @@ SECRET = "Cefzuj-hetveg-xifve5"
 OTHER = "Zorvik-lantem-quaj8"
 FILES = {
     "notes.txt": b"the quick brown fox " * 400,
-    "docs/readme.txt": b"hello from the ziplet command line\n" * 50,
+    "docs/readme.txt": b"hello from the zipctl command line\n" * 50,
     "docs/empty.txt": b"",
 }
 
@@ -88,7 +88,7 @@ def create(
         str(tree),
         ".",
         *options,
-        env={"ZIPLET_PASSWORD": SECRET, **env},
+        env={"ZIPCTL_PASSWORD": SECRET, **env},
         cwd=workdir,
     )
     assert result.returncode == 0, result
@@ -202,7 +202,7 @@ def test_7zip_reads_what_encrypt_writes(
         str(out),
         "--encryption",
         "aes256",
-        env={"ZIPLET_PASSWORD": OTHER},
+        env={"ZIPCTL_PASSWORD": OTHER},
         cwd=workdir,
     )
     assert result.returncode == 0, result
@@ -221,7 +221,7 @@ def test_7zip_reads_what_rewrite_writes_from_aes_to_zipcrypto(
         str(out),
         "--encryption",
         "zipcrypto",
-        env={"ZIPLET_OLD_PASSWORD": SECRET, "ZIPLET_PASSWORD": OTHER},
+        env={"ZIPCTL_OLD_PASSWORD": SECRET, "ZIPCTL_PASSWORD": OTHER},
         cwd=workdir,
     )
     assert result.returncode == 0, result
@@ -234,7 +234,7 @@ def test_7zip_reads_what_decrypt_writes_without_a_password(
 ) -> None:
     source = create(cli, workdir, tree, "--encryption", "aes192")
     out = workdir / "decrypted.zip"
-    result = cli("decrypt", str(source), str(out), env={"ZIPLET_PASSWORD": SECRET})
+    result = cli("decrypt", str(source), str(out), env={"ZIPCTL_PASSWORD": SECRET})
     assert result.returncode == 0, result
     assert sz_accepts(out)
     assert_reads_everything(out, None)
@@ -257,7 +257,7 @@ def test_the_cli_decrypts_an_archive_made_by_7zip(
     )
     assert made.returncode == 0, made.stdout + made.stderr
     plain = workdir / "plain.zip"
-    result = cli("decrypt", str(archive), str(plain), env={"ZIPLET_PASSWORD": SECRET})
+    result = cli("decrypt", str(archive), str(plain), env={"ZIPCTL_PASSWORD": SECRET})
     assert result.returncode == 0, result
     assert sz_accepts(plain)
     for name, data in FILES.items():

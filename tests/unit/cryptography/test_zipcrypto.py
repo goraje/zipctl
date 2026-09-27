@@ -5,14 +5,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ziplet.cryptography.zipcrypto import (
+from zipctl.cryptography.zipcrypto import (
     ZipCryptoDecrypter,
     ZipCryptoEncryptor,
     _gen_crc,
     _ZipCryptoState,
 )
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -175,7 +175,7 @@ class TestZipCryptoDecrypter:
         # Without this, h[11] with a wrong password is a random byte and there is
         # a 1/256 chance it accidentally matches the check byte, silently passing.
         with patch(
-            "ziplet.cryptography.zipcrypto.os.urandom", return_value=b"\x00" * 11
+            "zipctl.cryptography.zipcrypto.os.urandom", return_value=b"\x00" * 11
         ):
             _, header = _make_enc_header(b"correct", dos_time)
         zinfo = _make_dec_zinfo(use_data_descriptor=True, raw_time=dos_time)

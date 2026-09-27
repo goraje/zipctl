@@ -10,7 +10,7 @@ from typing import cast
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import CopyReport, load_json
 from tests.functional.cli.rewrite_support import (
@@ -22,16 +22,16 @@ from tests.functional.cli.rewrite_support import (
     snapshot,
 )
 from tests.functional.cli.support import Result, data_offset, flip_byte, write_archive
-from ziplet import ZipFile
+from zipctl import ZipFile
 
-AES256 = ziplet.ZipFileExtra(wz_aes_nbits=256)
+AES256 = zipctl.ZipFileExtra(wz_aes_nbits=256)
 
 
 def write_for(
     command: str,
     path: Path,
     members: list[tuple[str, bytes]],
-    compression: int = ziplet.ZIP_STORED,
+    compression: int = zipctl.ZIP_STORED,
 ) -> Path:
     """An archive fit for *command*: plain for encrypt, AES-256 for the others."""
     if command == "encrypt":
@@ -39,7 +39,7 @@ def write_for(
     return write_archive(
         path,
         members,
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
         extra=AES256,
         compression=compression,
@@ -56,7 +56,7 @@ def job(request: pytest.FixtureRequest, workdir: Path) -> tuple[str, Path, list[
         source = make_source(workdir / "in.zip")
         return name, source, ["--password-file", str(pw)]
     source = make_source(
-        workdir / "in.zip", encryption=ziplet.WZ_AES, password=PW, extra=AES256
+        workdir / "in.zip", encryption=zipctl.WZ_AES, password=PW, extra=AES256
     )
     if name == "decrypt":
         return name, source, ["--password-file", str(pw)]
@@ -244,7 +244,7 @@ def test_a_large_member_is_copied_intact(
         name,
         workdir / "big.zip",
         [("big.bin", big)],
-        compression=ziplet.ZIP_DEFLATED,
+        compression=zipctl.ZIP_DEFLATED,
     )
     result = cli(name, str(source), str(workdir / "out.zip"), *options)
     assert result.returncode == 0, result

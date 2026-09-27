@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from ziplet.cli.atomic import replacing
-from ziplet.cli.errors import CliError
+from zipctl.cli.atomic import replacing
+from zipctl.cli.errors import CliError
 
 
 def leftovers(directory: Path) -> list[str]:
-    return sorted(p.name for p in directory.iterdir() if p.name.startswith(".ziplet-"))
+    return sorted(p.name for p in directory.iterdir() if p.name.startswith(".zipctl-"))
 
 
 def test_success_moves_the_scratch_file_onto_the_target(tmp_path: Path) -> None:

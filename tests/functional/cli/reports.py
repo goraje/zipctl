@@ -1,4 +1,4 @@
-"""Shapes of the ``--json`` documents the ziplet commands print.
+"""Shapes of the ``--json`` documents the zipctl commands print.
 
 Each ``TypedDict`` lists the keys the tests read, so indexing a parsed
 document is typed instead of ``Any``.  Nothing checks a document against its
@@ -12,7 +12,7 @@ import json
 from typing import TypedDict, TypeVar, cast
 
 from tests.functional.cli.support import Result
-from ziplet.cli.output import JsonValue
+from zipctl.cli.output import JsonValue
 
 _T = TypeVar("_T")
 

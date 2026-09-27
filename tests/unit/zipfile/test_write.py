@@ -6,14 +6,14 @@ from typing import cast
 
 import pytest
 
-import ziplet
-from ziplet.compression import ZIP_STORED
-from ziplet.cryptography.base import BaseZipEncryptor
-from ziplet.zipfile import write as write_mod
-from ziplet.zipfile.file import ZipFile
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.shared import MASK_USE_DATA_DESCRIPTOR, ZIP64_LIMIT
-from ziplet.zipfile.write import ZipWriteFile
+import zipctl
+from zipctl.compression import ZIP_STORED
+from zipctl.cryptography.base import BaseZipEncryptor
+from zipctl.zipfile import write as write_mod
+from zipctl.zipfile.file import ZipFile
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.shared import MASK_USE_DATA_DESCRIPTOR, ZIP64_LIMIT
+from zipctl.zipfile.write import ZipWriteFile
 
 
 class _FakeEncryptor:
@@ -195,7 +195,7 @@ class TestWriteCoordinatorRecovery:
         original_limit = ZIP64_LIMIT
         monkeypatch.setattr(write_mod, "ZIP64_LIMIT", 1)
         archive = tmp_path / "recover.zip"
-        zf = ziplet.ZipFile(archive, "w")
+        zf = zipctl.ZipFile(archive, "w")
         writer = zf.open("big.bin", "w")
         writer.write(b"abcd")
         with pytest.raises(RuntimeError, match="ZIP64 limit"):
@@ -207,7 +207,7 @@ class TestWriteCoordinatorRecovery:
         zf.writestr("small.txt", b"ok")
         zf.close()
 
-        with ziplet.ZipFile(archive) as zf2:
+        with zipctl.ZipFile(archive) as zf2:
             assert zf2.read("small.txt") == b"ok"
 
 
@@ -219,10 +219,10 @@ def test_a_write_handle_that_fails_to_build_finalises_quietly(
 
     unraisable: list[object] = []
     monkeypatch.setattr(sys, "unraisablehook", unraisable.append)
-    with ziplet.ZipFile(io.BytesIO(), "w") as zf:
+    with zipctl.ZipFile(io.BytesIO(), "w") as zf:
         with pytest.raises(ValueError, match=r"\S"):
             zf.writestr(
-                "a.txt", b"x", compress_type=ziplet.ZIP_DEFLATED, compresslevel=99
+                "a.txt", b"x", compress_type=zipctl.ZIP_DEFLATED, compresslevel=99
             )
         zf.writestr("b.txt", b"still usable")
     gc.collect()
@@ -234,9 +234,9 @@ def test_mkdir_accepts_a_zipinfo_that_has_not_been_written_yet() -> None:
     info.external_attr = (0o40750 << 16) | 0x10
     info.comment = b"folder"
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         zf.mkdir(info)
-    with ziplet.ZipFile(buffer) as zf:
+    with zipctl.ZipFile(buffer) as zf:
         (entry,) = zf.infolist()
     assert entry.is_dir()
     assert (entry.file_size, entry.compress_size, entry.CRC) == (0, 0, 0)

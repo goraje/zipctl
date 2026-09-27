@@ -20,11 +20,11 @@ from tests.functional.cli.rewrite_support import (
     make_source,
     snapshot,
 )
-from ziplet import ZipFile
-from ziplet.cli import main
-from ziplet.zipfile.file import EncryptionOverride, ZipFileExtra
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.write import ZipWriteFile
+from zipctl import ZipFile
+from zipctl.cli import main
+from zipctl.zipfile.file import EncryptionOverride, ZipFileExtra
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.write import ZipWriteFile
 
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer
@@ -43,8 +43,8 @@ class OpenToWriteOptions(TypedDict, total=False):
 
 @pytest.fixture
 def run(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> Run:
-    monkeypatch.setenv("ZIPLET_PASSWORD", PASSWORD)
-    monkeypatch.setenv("ZIPLET_OLD_PASSWORD", PASSWORD)
+    monkeypatch.setenv("ZIPCTL_PASSWORD", PASSWORD)
+    monkeypatch.setenv("ZIPCTL_OLD_PASSWORD", PASSWORD)
 
     def go(*argv: str) -> tuple[int, str, str]:
         code = main(list(argv))
@@ -102,8 +102,8 @@ def test_data_of_a_different_length_is_caught_even_if_the_checksum_agrees(
         def crc32(_data: bytes, _value: int = 0) -> int:
             return 0
 
-    monkeypatch.setattr("ziplet.cli.commands.helpers.copying.copy.zlib", NoChecksum)
-    monkeypatch.setattr("ziplet.cli.commands.helpers.copying.verify.zlib", NoChecksum)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.copy.zlib", NoChecksum)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.verify.zlib", NoChecksum)
     drop_last_byte(monkeypatch)
     code, _, stderr = run(*RECOMPRESS, str(source), str(workdir / "out.zip"))
     assert code == 1, stderr
@@ -287,7 +287,7 @@ def test_a_lost_archive_comment_is_caught(
         def comment(self, comment: bytes) -> None:
             pass
 
-    monkeypatch.setattr("ziplet.cli.commands.helpers.copying.copy.ZipFile", Forgetful)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.copy.ZipFile", Forgetful)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
     assert code == 1
     assert "the archive comment differs" in stderr
@@ -296,7 +296,7 @@ def test_a_lost_archive_comment_is_caught(
 def test_an_unreadable_output_is_reported(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ziplet.exceptions import BadZipFile
+    from zipctl.exceptions import BadZipFile
 
     real = ZipFile
 
@@ -305,7 +305,7 @@ def test_an_unreadable_output_is_reported(
             raise BadZipFile("File is not a zip file")
         return real(path, mode)
 
-    monkeypatch.setattr("ziplet.cli.commands.helpers.copying.verify.ZipFile", flaky)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.verify.ZipFile", flaky)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
     assert code == 1
     assert "cannot be read back: File is not a zip file" in stderr
@@ -344,7 +344,7 @@ def test_a_compression_method_this_install_lacks_is_refused_up_front(
     method: str,
     hint: bool,
 ) -> None:
-    from ziplet.compression import registry
+    from zipctl.compression import registry
 
     def missing(_method: int) -> None:
         raise RuntimeError("not installed")
@@ -356,5 +356,5 @@ def test_a_compression_method_this_install_lacks_is_refused_up_front(
     )
     assert code == 2, stderr
     assert f"compression method '{method}' is not available" in stderr
-    assert ("ziplet[zstd]" in stderr) is hint
+    assert ("zipctl[zstd]" in stderr) is hint
     assert not (workdir / "out.zip").exists()

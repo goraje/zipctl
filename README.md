@@ -1,5 +1,5 @@
 <p align="center">
-	<img src="https://raw.githubusercontent.com/goraje/ziplet/main/assets/ziplet-logo.svg" alt="ziplet logo" width="380">
+	<img src="https://raw.githubusercontent.com/goraje/zipctl/main/assets/zipctl-logo.svg" alt="zipctl logo" width="380">
 </p>
 
 <p align="center">
@@ -7,7 +7,7 @@
 	<img src="https://img.shields.io/badge/license-MIT-245bcf?style=flat-square" alt="License: MIT">
 </p>
 
-`ziplet` is a standalone ZIP library derived from CPython's `zipfile`
+`zipctl` is a standalone ZIP library derived from CPython's `zipfile`
 module, extended with WinZip AES support adapted from pyzipper.
 
 The project aims to provide a `zipfile`-style API for applications that need
@@ -16,7 +16,7 @@ traditional ZipCrypto archives.
 
 ## Why this project exists
 
-`ziplet` started as a split-off from pyzipper for deployments that need to
+`zipctl` started as a split-off from pyzipper for deployments that need to
 use the `cryptography` package with a FIPS-configured OpenSSL provider.
 Pyzipper uses PyCryptodomeX for its cryptographic primitives, which is outside
 the FIPS-validated cryptographic boundary used by those deployments.
@@ -45,7 +45,7 @@ protection; version 1 stores the plaintext CRC-32 in both ZIP headers.
 - support for `ZIP_STORED`, `ZIP_DEFLATED`, `ZIP_BZIP2`, `ZIP_LZMA` and
   `ZIP_ZSTANDARD` compression
 
-ZIP LZMA archives declare their dictionary size in the member stream. ziplet
+ZIP LZMA archives declare their dictionary size in the member stream. zipctl
 rejects dictionaries larger than 1 GiB before constructing a decompressor.
 This bounds attacker-controlled allocation while retaining compatibility with
 normal ZIP LZMA archives; applications handling untrusted archives should also
@@ -54,18 +54,18 @@ apply extraction size and compression-ratio limits.
 ## Installation
 
 ```bash
-pip install ziplet
+pip install zipctl
 ```
 
 ## Intended usage
 
-The intended usage is the same as `zipfile`'s: use `ziplet.ZipFile` to create your archive, optionally choose a compression and/or encryption methods and
+The intended usage is the same as `zipfile`'s: use `zipctl.ZipFile` to create your archive, optionally choose a compression and/or encryption methods and
 set a password for encrypted archives if applicable.
 
 ### Creating a plain ZIP archive
 
 ```python
-from ziplet import ZipFile, ZIP_DEFLATED
+from zipctl import ZipFile, ZIP_DEFLATED
 
 with ZipFile("example.zip", "w", compression=ZIP_DEFLATED) as zf:
     zf.writestr("hello.txt", "hello world")
@@ -74,7 +74,7 @@ with ZipFile("example.zip", "w", compression=ZIP_DEFLATED) as zf:
 ### Reading a plain ZIP archive
 
 ```python
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 with ZipFile("example.zip", "r") as zf:
     data = zf.read("hello.txt")
@@ -83,7 +83,7 @@ with ZipFile("example.zip", "r") as zf:
 ### Writing an AES-encrypted archive
 
 ```python
-from ziplet import ZipFile, WZ_AES, ZIP_DEFLATED
+from zipctl import ZipFile, WZ_AES, ZIP_DEFLATED
 
 password = b"correct horse battery staple"
 
@@ -100,7 +100,7 @@ with ZipFile(
 ### Reading an encrypted ZIP archive
 
 ```python
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 password = b"correct horse battery staple"
 
@@ -120,7 +120,7 @@ output. It lets you override the WinZip AES version written into the extra
 field and choose the AES key size.
 
 ```python
-from ziplet import ZipFile, ZipFileExtra, WZ_AES, ZIP_DEFLATED
+from zipctl import ZipFile, ZipFileExtra, WZ_AES, ZIP_DEFLATED
 
 password = b"correct horse battery staple"
 extra = ZipFileExtra(force_wz_aes_version=1, wz_aes_nbits=256)
@@ -139,7 +139,7 @@ with ZipFile(
 ### Writing AES-encrypted archive with a different key size
 
 ```python
-from ziplet import ZipFile, ZipFileExtra, WZ_AES
+from zipctl import ZipFile, ZipFileExtra, WZ_AES
 
 password = b"correct horse battery staple"
 extra = ZipFileExtra(wz_aes_nbits=128)
@@ -152,7 +152,7 @@ with ZipFile("secret-aes-128.zip", "w", encryption=WZ_AES, extra=extra) as zf:
 ### Writing a ZipCrypto-encrypted archive
 
 ```python
-from ziplet import ZipFile, ZIP_CRYPTO, ZIP_DEFLATED
+from zipctl import ZipFile, ZIP_CRYPTO, ZIP_DEFLATED
 
 password = b"correct horse battery staple"
 
@@ -175,7 +175,7 @@ security-sensitive new archives; use WinZip AES instead.
 ```python
 import io
 
-from ziplet import ZipFile, WZ_AES
+from zipctl import ZipFile, WZ_AES
 
 password = b"correct horse battery staple"
 buffer = io.BytesIO()
@@ -199,7 +199,7 @@ inheritance explicit, `None` for a plaintext member, or an encryption method
 for a protected member.
 
 ```python
-from ziplet import INHERIT_ENCRYPTION, ZIP_CRYPTO, WZ_AES
+from zipctl import INHERIT_ENCRYPTION, ZIP_CRYPTO, WZ_AES
 
 with ZipFile("mixed.zip", "w", encryption=WZ_AES) as zf:
     zf.setpassword(b"default-password")
@@ -225,7 +225,7 @@ policy is supplied. For untrusted archives, pass an `ExtractPolicy`; policy
 enabled calls return structured results describing every member.
 
 ```python
-from ziplet import ExtractPolicy, ViolationAction
+from zipctl import ExtractPolicy, ViolationAction
 
 with ZipFile("input.zip") as zf:
     result = zf.extractall(
@@ -292,7 +292,7 @@ live in a file instead of code. The field names are exactly the policy's field
 names; `policy_to_json(ExtractPolicy())` prints a complete starting document.
 
 ```python
-policy = ziplet.policy_from_json(Path("rules.json").read_text())
+policy = zipctl.policy_from_json(Path("rules.json").read_text())
 with ZipFile("input.zip") as zf:
     zf.extractall("out", policy=policy)
 ```
@@ -356,7 +356,7 @@ opens, decompresses, decrypts, or writes a payload, and policy findings never
 raise `ExtractionError`.
 
 ```python
-from ziplet import ExtractPolicy, ZipFile
+from zipctl import ExtractPolicy, ZipFile
 
 with ZipFile("input.zip") as zf:
     report = zf.inspect(policy=ExtractPolicy(max_compression_ratio=100.0))
@@ -376,25 +376,25 @@ resolution; it does not create or modify that path.
 
 ## Command line
 
-`ziplet` (or `python -m ziplet`) inspects and verifies archives without writing
-any code. It needs nothing beyond ziplet itself.
+`zipctl` (or `python -m zipctl`) inspects and verifies archives without writing
+any code. It needs nothing beyond zipctl itself.
 
 ```
-ziplet list     ARCHIVE [MEMBER ...] [-l] [--json]      # names, or a table with -l
-ziplet test     ARCHIVE [MEMBER ...] [-v|-q] [--progress] [--json]  # check integrity
-ziplet inspect  ARCHIVE [-d DIR] [-q] [--json]          # what extraction would flag
-ziplet create   ARCHIVE PATH ... [-C DIR] [--exclude GLOB] [-n]  # build an archive
-ziplet extract  ARCHIVE [MEMBER ...] [--match GLOB] [-d DIR]  # policy-guarded extraction
-ziplet check-password ARCHIVE [MEMBER ...] [--full] [-v] [--json]
-ziplet encrypt  IN OUT [--encryption METHOD] [--match GLOB ...]   # protect a plain archive
-ziplet decrypt  IN OUT [--match GLOB ...]                     # remove the protection
-ziplet rewrite  IN OUT [--compression METHOD] [--encryption ...]  # change method, password, compression
-ziplet policy show     [--policy FILE] [--policy-json TEXT]
-ziplet policy validate FILE [FILE ...] [--json]
+zipctl list     ARCHIVE [MEMBER ...] [-l] [--json]      # names, or a table with -l
+zipctl test     ARCHIVE [MEMBER ...] [-v|-q] [--progress] [--json]  # check integrity
+zipctl inspect  ARCHIVE [-d DIR] [-q] [--json]          # what extraction would flag
+zipctl create   ARCHIVE PATH ... [-C DIR] [--exclude GLOB] [-n]  # build an archive
+zipctl extract  ARCHIVE [MEMBER ...] [--match GLOB] [-d DIR]  # policy-guarded extraction
+zipctl check-password ARCHIVE [MEMBER ...] [--full] [-v] [--json]
+zipctl encrypt  IN OUT [--encryption METHOD] [--match GLOB ...]   # protect a plain archive
+zipctl decrypt  IN OUT [--match GLOB ...]                     # remove the protection
+zipctl rewrite  IN OUT [--compression METHOD] [--encryption ...]  # change method, password, compression
+zipctl policy show     [--policy FILE] [--policy-json TEXT]
+zipctl policy validate FILE [FILE ...] [--json]
 ```
 
-- Shell completion is optional: `pip install "ziplet[completion]"`, then
-  `ziplet --print-completions fish > ~/.config/fish/completions/ziplet.fish`
+- Shell completion is optional: `pip install "zipctl[completion]"`, then
+  `zipctl --print-completions fish > ~/.config/fish/completions/zipctl.fish`
   (`bash`, `zsh` and `tcsh` work too; each shell's own documentation says where
   its completion scripts go).
 - `list` prints member names; `-l` adds a table with the mode, sizes, compression
@@ -439,7 +439,7 @@ ziplet policy validate FILE [FILE ...] [--json]
   you pass `--force` (replace) or `--append` (add members, keeping the rest; it
   is rewritten through a copy, and names already in it are an error).
   - `--encryption aes256|aes192|aes128|zipcrypto|none` protects every file with one
-    password (from `--password-file`, `--password-stdin`, `ZIPLET_PASSWORD`, or
+    password (from `--password-file`, `--password-stdin`, `ZIPCTL_PASSWORD`, or
     typed twice at a terminal). `--wz-aes-version 1` writes the older AES format
     for tools that need it; ZipCrypto is weak and prints a warning.
   - `--protect 'GLOB[=METHOD]'` (repeatable) protects the members matching `GLOB`
@@ -453,7 +453,7 @@ ziplet policy validate FILE [FILE ...] [--json]
     ```json
     {
       "version": 1,
-      "default": {"method": "aes256", "password": {"env": "ZIPLET_PASSWORD"}},
+      "default": {"method": "aes256", "password": {"env": "ZIPCTL_PASSWORD"}},
       "rules": [
         {"match": "secrets/**", "method": "aes256", "password": {"file": "/run/secrets/vault"}},
         {"match": "*.key", "method": "aes128", "password": {"prompt": "Password for keys"}},
@@ -482,7 +482,7 @@ ziplet policy validate FILE [FILE ...] [--json]
   no limits apply) and cannot be combined with the options that configure the
   policy.
 - `check-password` answers "is this the password?" without extracting. It
-  takes one password (from a file, standard input, `ZIPLET_PASSWORD` or a single
+  takes one password (from a file, standard input, `ZIPCTL_PASSWORD` or a single
   prompt, never as an argument) and tests it against every encrypted member, or
   against the `MEMBER` names / patterns you give (`*` and `?` stay inside one
   directory, `**` crosses directories, `[abc]` is a character class; a name
@@ -507,7 +507,7 @@ ziplet policy validate FILE [FILE ...] [--json]
   `create`.
   - `encrypt IN OUT` gives every file `--encryption aes256|aes192|aes128|zipcrypto`
     (default `aes256`; `--wz-aes-version 1` for old tools) with one password: from
-    `--password-file`, `--password-stdin`, `ZIPLET_PASSWORD`, or typed twice at a
+    `--password-file`, `--password-stdin`, `ZIPCTL_PASSWORD`, or typed twice at a
     terminal. `--match GLOB` (repeatable) protects only the matching files. A
     pattern that matches nothing is an error, and so is an input that already
     has encrypted members (use `rewrite` for those).
@@ -518,7 +518,7 @@ ziplet policy validate FILE [FILE ...] [--json]
     with nothing encrypted is an error.
   - `rewrite IN OUT` changes what you ask for and keeps the rest. Members are
     unlocked with `--old-password-file`, `--old-password-stdin`,
-    `ZIPLET_OLD_PASSWORD`, or a prompt, and protected again by the same options
+    `ZIPCTL_OLD_PASSWORD`, or a prompt, and protected again by the same options
     as `create` (`--encryption`, `--protect`, `--encryption-spec`,
     `--wz-aes-version`, whose passwords come from the ordinary password
     options); a member that no rule covers keeps its current scheme and password.
@@ -531,15 +531,15 @@ ziplet policy validate FILE [FILE ...] [--json]
   so human-readable output escapes anything unprintable (`\x1b`, `\u202e`).
   `--json` output is plain ASCII and keeps names exactly.
 - `--json` prints one JSON document on standard output; problems go to standard
-  error as `ziplet: error: ...`, and are also written to standard output as
+  error as `zipctl: error: ...`, and are also written to standard output as
   `{"ok": false, "error": ..., "code": N, "details": [...]}` so a script can read
   one stream. (A command line argparse rejects, exit `2`, is reported as plain
   text only.)
-- `ZIPLET_POLICY` names a policy file that `extract`, `inspect` and `policy show`
+- `ZIPCTL_POLICY` names a policy file that `extract`, `inspect` and `policy show`
   start from, under `--policy` and `--policy-json`; `extract --no-policy` ignores
   it. It is a default for convenience, not a control: anyone can override it with
-  `--policy`. `ZIPLET_DEBUG=1` prints the traceback of an error, and an error the
-  CLI did not expect is otherwise reported as `ziplet: error: unexpected ...`.
+  `--policy`. `ZIPCTL_DEBUG=1` prints the traceback of an error, and an error the
+  CLI did not expect is otherwise reported as `zipctl: error: unexpected ...`.
 
 Exit codes: `0` success, `1` the operation ran and failed (a bad member, policy
 violations, an unreadable archive), `2` a bad command line or configuration
@@ -547,7 +547,7 @@ file, `130` interrupted (Ctrl-C), `141` the reader of the output went away.
 
 Passwords are never accepted as arguments, since they would show up in process
 listings and shell history. They come from, in this order: `--password-file
-FILE` and/or `--password-stdin` (the first line), else the `ZIPLET_PASSWORD`
+FILE` and/or `--password-stdin` (the first line), else the `ZIPCTL_PASSWORD`
 environment variable (`--password-prompt` skips the variable and asks at the
 terminal instead). When a terminal is attached and no source has the right
 password, you are asked for the password of each encrypted member that needs
@@ -652,7 +652,7 @@ compatibility with code using the CPython-style metadata attribute.
 ## Notes
 
 - `ZIP_ZSTANDARD` compression uses stdlib `compression.zstd` (Python 3.14+); on
-  Python 3.10-3.13 install the optional extra (`pip install "ziplet[zstd]"`,
+  Python 3.10-3.13 install the optional extra (`pip install "zipctl[zstd]"`,
   which pulls in `backports.zstd`), otherwise using it raises `RuntimeError`
 - ZIP archives that span multiple disks are not supported (same as the standard
   library) and are rejected with `BadZipFile`
@@ -670,9 +670,9 @@ The project is intended to interoperate with common ZIP tooling while exposing
 an API that feels like the standard library.
 
 - the functional test suite includes 7-Zip interoperability checks in both
-	directions: archives written by `ziplet` are validated by 7-Zip, and
+	directions: archives written by `zipctl` are validated by 7-Zip, and
 	AES- and ZipCrypto-encrypted archives written by 7-Zip are read by
-	`ziplet`
+	`zipctl`
 - the same holds for the command line: 7-Zip reads what `create`, `encrypt`,
 	`decrypt` and `rewrite` write (AES-128/192/256, ZipCrypto, per-file
 	protection), and `decrypt` reads what 7-Zip encrypts

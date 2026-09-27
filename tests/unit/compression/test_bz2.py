@@ -6,7 +6,7 @@ import bz2 as _bz2
 
 import pytest
 
-from ziplet.compression import bz2
+from zipctl.compression import bz2
 
 pytestmark = pytest.mark.skipif(
     bz2.compression_entry is None,

@@ -1,4 +1,4 @@
-"""``ziplet test``: integrity checks, failure reporting, non-interactive passwords."""
+"""``zipctl test``: integrity checks, failure reporting, non-interactive passwords."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import VerifyReport, load_json
 from tests.functional.cli.support import (
@@ -19,8 +19,8 @@ from tests.functional.cli.support import (
     set_flag_bits,
     write_archive,
 )
-from ziplet import ZipFile
-from ziplet.compression import registry
+from zipctl import ZipFile
+from zipctl.compression import registry
 
 PW = PASSWORD.encode()
 BODY = b"integrity check payload " * 200
@@ -35,7 +35,7 @@ def _failed(result: Result) -> list[str]:
 
 @pytest.mark.parametrize(
     "compression",
-    [ziplet.ZIP_STORED, ziplet.ZIP_DEFLATED, ziplet.ZIP_BZIP2, ziplet.ZIP_LZMA],
+    [zipctl.ZIP_STORED, zipctl.ZIP_DEFLATED, zipctl.ZIP_BZIP2, zipctl.ZIP_LZMA],
 )
 def test_intact_archive_passes(cli: CliRunner, workdir: Path, compression: int) -> None:
     path = write_archive(
@@ -50,11 +50,11 @@ def test_intact_archive_passes(cli: CliRunner, workdir: Path, compression: int) 
 
 
 @pytest.mark.skipif(
-    registry._registry.get(ziplet.ZIP_ZSTANDARD) is None, reason="zstd unavailable"
+    registry._registry.get(zipctl.ZIP_ZSTANDARD) is None, reason="zstd unavailable"
 )
 def test_zstd_archive_passes(cli: CliRunner, workdir: Path) -> None:
     path = write_archive(
-        workdir / "z.zip", [("a.txt", BODY)], compression=ziplet.ZIP_ZSTANDARD
+        workdir / "z.zip", [("a.txt", BODY)], compression=zipctl.ZIP_ZSTANDARD
     )
     assert cli("test", str(path)).returncode == 0
 
@@ -85,7 +85,7 @@ def test_empty_archive_passes(cli: CliRunner, workdir: Path) -> None:
 def test_large_member_is_read_across_many_chunks(cli: CliRunner, workdir: Path) -> None:
     payload = bytes(range(251)) * (3 * 1024 * 1024 // 251)
     path = write_archive(
-        workdir / "big.zip", [("big.bin", payload)], compression=ziplet.ZIP_DEFLATED
+        workdir / "big.zip", [("big.bin", payload)], compression=zipctl.ZIP_DEFLATED
     )
     assert cli("test", str(path)).returncode == 0
 
@@ -158,7 +158,7 @@ def test_json_report_lists_failures_with_details(cli: CliRunner, workdir: Path) 
 
 
 @pytest.mark.parametrize(
-    "compression", [ziplet.ZIP_DEFLATED, ziplet.ZIP_BZIP2, ziplet.ZIP_LZMA]
+    "compression", [zipctl.ZIP_DEFLATED, zipctl.ZIP_BZIP2, zipctl.ZIP_LZMA]
 )
 def test_damaged_compressed_streams_are_reported_not_crashes(
     cli: CliRunner, workdir: Path, compression: int
@@ -238,7 +238,7 @@ def aes_archive(workdir: Path) -> Path:
     return write_archive(
         workdir / "aes.zip",
         [("secret.txt", BODY), ("more.txt", BODY)],
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
     )
 
@@ -256,7 +256,7 @@ def test_encrypted_members_fail_without_a_password_and_say_how_to_supply_one(
     assert result.returncode == 1, result
     assert len(_failed(result)) == 2
     assert "password required" in result.stdout
-    for hint in ("--password-file", "--password-stdin", "ZIPLET_PASSWORD"):
+    for hint in ("--password-file", "--password-stdin", "ZIPCTL_PASSWORD"):
         assert hint in result.stdout
 
 
@@ -267,7 +267,7 @@ def test_unencrypted_members_are_still_tested_when_others_need_a_password(
     with ZipFile(path, "w") as zf:
         zf.setpassword(PW)
         zf.writestr("open.txt", BODY)
-        zf.writestr("locked.txt", BODY, encryption=ziplet.WZ_AES)
+        zf.writestr("locked.txt", BODY, encryption=zipctl.WZ_AES)
     result = cli("test", "-v", str(path))
     assert "OK      open.txt" in result.stdout
     assert "FAILED  locked.txt: password required" in result.stdout
@@ -277,7 +277,7 @@ def test_unencrypted_members_are_still_tested_when_others_need_a_password(
 def test_password_file_may_hold_non_utf8_bytes(cli: CliRunner, workdir: Path) -> None:
     raw = b"\xff\xfe binary \x00 secret"
     path = write_archive(
-        workdir / "bin.zip", [("s.txt", BODY)], encryption=ziplet.WZ_AES, password=raw
+        workdir / "bin.zip", [("s.txt", BODY)], encryption=zipctl.WZ_AES, password=raw
     )
     passfile = _passfile(workdir, raw + b"\n")
     assert cli("test", "--password-file", str(passfile), str(path)).returncode == 0
@@ -291,7 +291,7 @@ def test_password_from_stdin(cli: CliRunner, aes_archive: Path) -> None:
 
 
 def test_password_from_the_environment(cli: CliRunner, aes_archive: Path) -> None:
-    result = cli("test", str(aes_archive), env={"ZIPLET_PASSWORD": PASSWORD})
+    result = cli("test", str(aes_archive), env={"ZIPCTL_PASSWORD": PASSWORD})
     assert result.returncode == 0, result
 
 
@@ -324,7 +324,7 @@ def test_per_member_passwords_are_matched_to_their_members(
     cli: CliRunner, workdir: Path
 ) -> None:
     path = workdir / "per.zip"
-    with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
         zf.writestr("alpha.txt", BODY, password=b"alpha-pass")
         zf.writestr("beta.txt", BODY, password=b"beta-pass")
         zf.writestr("plain.txt", BODY, encryption=None)
@@ -343,21 +343,21 @@ def test_per_member_passwords_are_matched_to_their_members(
 
 
 ENCRYPTED_FLAVOURS = [
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=128)),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=192)),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=256)),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(force_wz_aes_version=1)),
-    (ziplet.ZIP_CRYPTO, None),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=128)),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=192)),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=256)),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(force_wz_aes_version=1)),
+    (zipctl.ZIP_CRYPTO, None),
 ]
 
 
 @pytest.mark.parametrize(("encryption", "extra"), ENCRYPTED_FLAVOURS)
-@pytest.mark.parametrize("compression", [ziplet.ZIP_STORED, ziplet.ZIP_DEFLATED])
+@pytest.mark.parametrize("compression", [zipctl.ZIP_STORED, zipctl.ZIP_DEFLATED])
 def test_every_encryption_scheme_verifies_with_the_right_password(
     cli: CliRunner,
     workdir: Path,
     encryption: str,
-    extra: ziplet.ZipFileExtra | None,
+    extra: zipctl.ZipFileExtra | None,
     compression: int,
 ) -> None:
     path = write_archive(
@@ -368,14 +368,14 @@ def test_every_encryption_scheme_verifies_with_the_right_password(
         password=PW,
         extra=extra,
     )
-    result = cli("test", str(path), env={"ZIPLET_PASSWORD": PASSWORD})
+    result = cli("test", str(path), env={"ZIPCTL_PASSWORD": PASSWORD})
     assert result.returncode == 0, result
     assert result.stdout == "Tested 2 members: all OK\n"
 
 
 @pytest.mark.parametrize(("encryption", "extra"), ENCRYPTED_FLAVOURS)
 def test_tampered_encrypted_data_is_detected(
-    cli: CliRunner, workdir: Path, encryption: str, extra: ziplet.ZipFileExtra | None
+    cli: CliRunner, workdir: Path, encryption: str, extra: zipctl.ZipFileExtra | None
 ) -> None:
     path = write_archive(
         workdir / "e.zip",
@@ -385,7 +385,7 @@ def test_tampered_encrypted_data_is_detected(
         extra=extra,
     )
     flip_byte(path, data_offset(path, "a.txt") + 30)
-    result = cli("test", str(path), env={"ZIPLET_PASSWORD": PASSWORD})
+    result = cli("test", str(path), env={"ZIPCTL_PASSWORD": PASSWORD})
     assert result.returncode == 1, result
     (failure,) = _failed(result)
     assert "corrupt data, or the password is wrong" in failure
@@ -416,7 +416,7 @@ def test_archives_without_encrypted_members_never_touch_password_sources(
 ) -> None:
     """Even a bad password file must not matter when nothing is encrypted."""
     path = write_archive(workdir / "plain.zip", [("a.txt", BODY)])
-    result = cli("test", str(path), env={"ZIPLET_PASSWORD": "anything"})
+    result = cli("test", str(path), env={"ZIPCTL_PASSWORD": "anything"})
     assert result.returncode == 0
 
 

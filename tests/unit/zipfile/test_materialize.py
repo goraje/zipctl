@@ -9,13 +9,13 @@ from typing import IO, cast
 
 import pytest
 
-from ziplet.zipfile.exceptions import (
+from zipctl.zipfile.exceptions import (
     ExtractionMaterializationError,
     ExtractionQuotaExceeded,
     ExtractionSecurityError,
 )
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.materialize import (
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.materialize import (
     ExtractionQuota,
     MaterializationResult,
     materialize_directory,

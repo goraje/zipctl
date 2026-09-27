@@ -12,18 +12,18 @@ from unittest import mock
 
 import pytest
 
-import ziplet
+import zipctl
 
 PASSWORD = b"Cefzuj-hetveg-xifve5"
 CONTENT = "This is a test file."
 
 COMPRESSIONS = [
-    pytest.param(ziplet.ZIP_STORED, id="ZIP_STORED"),
-    pytest.param(ziplet.ZIP_DEFLATED, id="ZIP_DEFLATED"),
-    pytest.param(ziplet.ZIP_BZIP2, id="ZIP_BZIP2"),
-    pytest.param(ziplet.ZIP_LZMA, id="ZIP_LZMA"),
+    pytest.param(zipctl.ZIP_STORED, id="ZIP_STORED"),
+    pytest.param(zipctl.ZIP_DEFLATED, id="ZIP_DEFLATED"),
+    pytest.param(zipctl.ZIP_BZIP2, id="ZIP_BZIP2"),
+    pytest.param(zipctl.ZIP_LZMA, id="ZIP_LZMA"),
     pytest.param(
-        ziplet.ZIP_ZSTANDARD,
+        zipctl.ZIP_ZSTANDARD,
         id="ZIP_ZSTANDARD",
         marks=pytest.mark.skipif(
             sys.version_info < (3, 14),
@@ -35,8 +35,8 @@ COMPRESSIONS = [
 # Columns: encryption on write, encryption on read, whether a password is needed.
 ENCRYPTIONS = [
     pytest.param(None, None, False, id="None"),
-    pytest.param(ziplet.WZ_AES, ziplet.WZ_AES, True, id="WZ_AES"),
-    pytest.param(ziplet.ZIP_CRYPTO, None, True, id="ZipCrypto"),
+    pytest.param(zipctl.WZ_AES, zipctl.WZ_AES, True, id="WZ_AES"),
+    pytest.param(zipctl.ZIP_CRYPTO, None, True, id="ZipCrypto"),
 ]
 
 
@@ -51,7 +51,7 @@ def test_round_trip(
 ) -> None:
     path = tmp_path / "test.zip"
 
-    with ziplet.ZipFile(
+    with zipctl.ZipFile(
         path,
         "w",
         compression=compression,
@@ -61,7 +61,7 @@ def test_round_trip(
             zf.setpassword(PASSWORD)
         zf.writestr("test.txt", CONTENT)
 
-    with ziplet.ZipFile(path, "r", encryption=enc_read) as zf:
+    with zipctl.ZipFile(path, "r", encryption=enc_read) as zf:
         if needs_pwd:
             zf.setpassword(PASSWORD)
         result = zf.read("test.txt").decode()
@@ -76,5 +76,5 @@ def test_zip64_eocd_round_trip(tmp_path: Path) -> None:
         with _stdlib_zipfile.ZipFile(path, "w", allowZip64=True) as zf:
             zf.writestr("test.txt", CONTENT)
 
-    with ziplet.ZipFile(path, "r") as zf:
+    with zipctl.ZipFile(path, "r") as zf:
         assert zf.read("test.txt").decode() == CONTENT

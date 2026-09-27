@@ -1,4 +1,4 @@
-"""``ziplet inspect``: metadata-only reporting of what extraction would flag."""
+"""``zipctl inspect``: metadata-only reporting of what extraction would flag."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import InspectReport, load_json
 from tests.functional.cli.support import (
@@ -20,8 +20,8 @@ from tests.functional.cli.support import (
     special_info,
     write_archive,
 )
-from ziplet import ZipFile
-from ziplet.cli.output import JsonValue
+from zipctl import ZipFile
+from zipctl.cli.output import JsonValue
 
 S_IFLNK, S_IFIFO, S_IFCHR = 0o120000, 0o010000, 0o020000
 
@@ -133,7 +133,7 @@ def test_encrypted_members_are_listed_without_a_password(
     cli: CliRunner, workdir: Path, dest: Path
 ) -> None:
     path = workdir / "e.zip"
-    with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(PASSWORD.encode())
         zf.writestr("secret.txt", b"s")
         zf.writestr("open.txt", b"o", encryption=None)
@@ -206,7 +206,7 @@ def test_default_policy_matches_what_extraction_enforces(
     with ZipFile(path) as zf:  # rewrite deflated so the ratio is huge
         pass
     bomb = workdir / "bomb.zip"
-    with ZipFile(bomb, "w", compression=ziplet.ZIP_DEFLATED) as zf:
+    with ZipFile(bomb, "w", compression=zipctl.ZIP_DEFLATED) as zf:
         zf.writestr("zeros.bin", b"\0" * 2_000_000)
     result = cli("inspect", "--json", "-d", str(dest), str(bomb))
     assert result.returncode == 1
@@ -383,7 +383,7 @@ def test_invalid_policy_lists_every_problem_and_exits_2(
     )  # fmt: skip
     assert result.returncode == 2, result
     assert result.stdout == ""
-    assert "ziplet: error: invalid policy (--policy-json)" in result.stderr
+    assert "zipctl: error: invalid policy (--policy-json)" in result.stderr
     assert "max_entires: unknown field; did you mean 'max_entries'?" in result.stderr
     assert "on_violation: expected one of" in result.stderr
     assert "blocked_extensions[1]: expected an extension" in result.stderr

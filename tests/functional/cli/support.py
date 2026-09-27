@@ -15,9 +15,9 @@ from typing import TypedDict
 
 from typing_extensions import override
 
-import ziplet
-from ziplet import ZipFile
-from ziplet.zipfile.info import ZipInfo
+import zipctl
+from zipctl import ZipFile
+from zipctl.zipfile.info import ZipInfo
 
 HAS_PTY = sys.platform != "win32"
 
@@ -56,8 +56,8 @@ class Result:
 
 
 def clean_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
-    """A predictable environment: UTF-8 I/O, no inherited ziplet password."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("ZIPLET_")}
+    """A predictable environment: UTF-8 I/O, no inherited zipctl password."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ZIPCTL_")}
     env["PYTHONIOENCODING"] = "utf-8"
     env.pop("PYTHONWARNINGS", None)
     if extra:
@@ -66,7 +66,7 @@ def clean_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
 
 
 def command(*args: str) -> list[str]:
-    return [sys.executable, "-m", "ziplet", *args]
+    return [sys.executable, "-m", "zipctl", *args]
 
 
 class RunOptions(TypedDict, total=False):
@@ -83,7 +83,7 @@ def run(
     env: Mapping[str, str] | None = None,
     cwd: Path | None = None,
 ) -> Result:
-    """Run ``python -m ziplet ARGS`` and capture everything it did."""
+    """Run ``python -m zipctl ARGS`` and capture everything it did."""
     completed = subprocess.run(
         command(*args),
         input=stdin if isinstance(stdin, bytes) else (stdin or "").encode(),
@@ -195,10 +195,10 @@ def write_archive(
     path: Path,
     members: Iterable[tuple[str | ZipInfo, bytes]],
     *,
-    compression: int = ziplet.ZIP_STORED,
+    compression: int = zipctl.ZIP_STORED,
     encryption: str | None = None,
     password: bytes | None = None,
-    extra: ziplet.ZipFileExtra | None = None,
+    extra: zipctl.ZipFileExtra | None = None,
     comment: bytes = b"",
 ) -> Path:
     with ZipFile(

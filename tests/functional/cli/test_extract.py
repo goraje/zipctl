@@ -1,4 +1,4 @@
-"""``ziplet extract``: safety by default, policies, overwrites, passwords, progress."""
+"""``zipctl extract``: safety by default, policies, overwrites, passwords, progress."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from typing_extensions import override
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import ExtractReport, load_json
 from tests.functional.cli.support import (
@@ -23,7 +23,7 @@ from tests.functional.cli.support import (
     write_archive,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 PW = PASSWORD.encode()
 posix_only = pytest.mark.skipif(os.name != "posix", reason="needs POSIX file types")
@@ -42,7 +42,7 @@ def tree(root: Path) -> dict[str, bytes | None]:
 @pytest.fixture
 def sample(workdir: Path) -> Path:
     path = workdir / "sample.zip"
-    with ZipFile(path, "w", compression=ziplet.ZIP_DEFLATED) as zf:
+    with ZipFile(path, "w", compression=zipctl.ZIP_DEFLATED) as zf:
         zf.mkdir("docs")
         zf.writestr("docs/readme.txt", b"readme " * 20)
         zf.writestr("docs/deep/er/notes.md", b"# notes\n")
@@ -162,18 +162,18 @@ def test_every_compression_and_encryption_flavour_extracts(
 ) -> None:
     body = bytes(range(256)) * 40
     flavours = [
-        (ziplet.ZIP_STORED, None, None),
-        (ziplet.ZIP_DEFLATED, None, None),
-        (ziplet.ZIP_BZIP2, None, None),
-        (ziplet.ZIP_LZMA, None, None),
-        (ziplet.ZIP_DEFLATED, ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=128)),
-        (ziplet.ZIP_STORED, ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=192)),
+        (zipctl.ZIP_STORED, None, None),
+        (zipctl.ZIP_DEFLATED, None, None),
+        (zipctl.ZIP_BZIP2, None, None),
+        (zipctl.ZIP_LZMA, None, None),
+        (zipctl.ZIP_DEFLATED, zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=128)),
+        (zipctl.ZIP_STORED, zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=192)),
         (
-            ziplet.ZIP_DEFLATED,
-            ziplet.WZ_AES,
-            ziplet.ZipFileExtra(force_wz_aes_version=1),
+            zipctl.ZIP_DEFLATED,
+            zipctl.WZ_AES,
+            zipctl.ZipFileExtra(force_wz_aes_version=1),
         ),
-        (ziplet.ZIP_DEFLATED, ziplet.ZIP_CRYPTO, None),
+        (zipctl.ZIP_DEFLATED, zipctl.ZIP_CRYPTO, None),
     ]
     for index, (compression, encryption, extra) in enumerate(flavours):
         archive = write_archive(
@@ -186,7 +186,7 @@ def test_every_compression_and_encryption_flavour_extracts(
         )
         dest = workdir / f"out{index}"
         result = cli(
-            "extract", str(archive), "-d", str(dest), env={"ZIPLET_PASSWORD": PASSWORD}
+            "extract", str(archive), "-d", str(dest), env={"ZIPCTL_PASSWORD": PASSWORD}
         )
         assert result.returncode == 0, (index, result)
         assert (dest / "a.bin").read_bytes() == body
@@ -400,7 +400,7 @@ def test_a_compression_bomb_is_refused_by_default(
     archive = write_archive(
         workdir / "bomb.zip",
         [("zeros.bin", b"\0" * 3_000_000), ("ok.txt", b"ok")],
-        compression=ziplet.ZIP_DEFLATED,
+        compression=zipctl.ZIP_DEFLATED,
     )
     dest = workdir / "dest"
     result = cli("extract", str(archive), "-d", str(dest))
@@ -537,7 +537,7 @@ def test_warn_level_findings_are_reported_but_extracted(
     )  # fmt: skip
     assert result.returncode == 0, result
     assert sorted(tree(dest)) == ["x.exe", "y.txt"]
-    assert "ziplet: warning: x.exe: extension is blocked" in result.stderr
+    assert "zipctl: warning: x.exe: extension is blocked" in result.stderr
     assert "Traceback" not in result.stderr
     quiet = cli(
         "extract", "-q", str(archive), "-d", str(workdir / "d2"),
@@ -588,7 +588,7 @@ def test_policy_and_password_cannot_both_read_standard_input(
     cli: CliRunner, workdir: Path
 ) -> None:
     archive = write_archive(
-        workdir / "e.zip", [("a", b"1")], encryption=ziplet.WZ_AES, password=PW
+        workdir / "e.zip", [("a", b"1")], encryption=zipctl.WZ_AES, password=PW
     )
     result = cli(
         "extract", str(archive), "-d", str(workdir / "o"), "--policy", "-",
@@ -638,7 +638,7 @@ def test_overwrite_replace(cli: CliRunner, two_files: Path, workdir: Path) -> No
     result = cli("extract", str(two_files), "-d", str(dest), "--overwrite", "replace")
     assert result.returncode == 0, result
     assert tree(dest) == {"a.txt": b"NEW a", "b.txt": b"NEW b"}
-    assert not list(dest.glob(".ziplet-*"))
+    assert not list(dest.glob(".zipctl-*"))
 
 
 def test_overwrite_rename_keeps_both(
@@ -775,7 +775,7 @@ def test_no_fsync_is_accepted(cli: CliRunner, sample: Path, workdir: Path) -> No
 @pytest.fixture
 def per_member(workdir: Path) -> Path:
     path = workdir / "per.zip"
-    with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
         zf.writestr("alpha.txt", b"alpha!", password=b"pass-alpha")
         zf.writestr("beta.txt", b"beta!", password=b"pass-beta")
         zf.writestr("plain.txt", b"plain!", encryption=None)
@@ -832,7 +832,7 @@ def test_password_from_the_environment_and_from_stdin(
     archive = write_archive(
         workdir / "e.zip",
         [("a", b"1"), ("b", b"2")],
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
     )
     assert (
@@ -841,7 +841,7 @@ def test_password_from_the_environment_and_from_stdin(
             str(archive),
             "-d",
             str(workdir / "x"),
-            env={"ZIPLET_PASSWORD": PASSWORD},
+            env={"ZIPCTL_PASSWORD": PASSWORD},
         ).returncode
         == 0
     )
@@ -925,9 +925,9 @@ def test_interrupting_a_prompt_stops_cleanly_and_leaves_no_partial_files(
         "extract", str(per_member), "-d", str(dest), interrupt_at_prompt=1
     )
     assert result.returncode == 130, result
-    assert "ziplet: interrupted" in result.stderr
+    assert "zipctl: interrupted" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not list(dest.rglob(".ziplet-*"))
+    assert not list(dest.rglob(".zipctl-*"))
     assert not (dest / "alpha.txt").exists()
 
 
@@ -976,7 +976,7 @@ def test_a_corrupt_member_fails_alone_and_leaves_no_partial_file(
     assert sorted(tree(dest)) == ["a.txt", "z.txt"]
     assert "FAILED  bad.txt: " in result.stdout
     assert "CRC" in result.stdout
-    assert not list(dest.rglob(".ziplet-*"))
+    assert not list(dest.rglob(".zipctl-*"))
     assert "Traceback" not in result.stderr
 
 
@@ -989,7 +989,7 @@ def test_a_corrupt_member_without_a_policy_is_an_error_message(
     result = cli("extract", "--no-policy", str(archive), "-d", str(workdir / "d"))
     assert result.returncode == 1
     assert "cannot extract:" in result.stderr
-    assert not list((workdir / "d").rglob(".ziplet-*"))
+    assert not list((workdir / "d").rglob(".zipctl-*"))
     assert "Traceback" not in result.stderr
 
 
@@ -1067,7 +1067,7 @@ def test_on_a_terminal_progress_rewrites_one_status_line_and_clears_it(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from ziplet.cli import main
+    from zipctl.cli import main
 
     terminal_err = _FakeTerminal()
     monkeypatch.setattr(sys, "stderr", terminal_err)
@@ -1086,7 +1086,7 @@ def test_on_a_terminal_progress_rewrites_one_status_line_and_clears_it(
 def test_files_are_fsynced_by_default_and_not_with_no_fsync(
     sample: Path, workdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ziplet.cli import main
+    from zipctl.cli import main
 
     calls: list[int] = []
     real_fsync = os.fsync

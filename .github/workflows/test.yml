@@ -131,7 +131,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run pytest with coverage
-        run: uv run pytest -v tests/unit --cov=src/ziplet --cov-report=term
+        run: uv run pytest -v tests/unit --cov=src/zipctl --cov-report=term
 
   pytest-functional:
     name: pytest functional ${{ matrix.python-version }}
@@ -158,7 +158,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run pytest with coverage
-        run: uv run pytest -v tests/functional --cov=src/ziplet --cov-report=term
+        run: uv run pytest -v tests/functional --cov=src/zipctl --cov-report=term
 
   pytest-windows-7zip:
     name: 7-zip

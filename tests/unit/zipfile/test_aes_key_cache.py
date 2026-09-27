@@ -9,13 +9,13 @@ import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-import ziplet
-from ziplet import ZipFile
-from ziplet.cryptography import aes
-from ziplet.cryptography.aes import AesKeyCache, AesZipDecrypter
-from ziplet.exceptions import BadPassword
-from ziplet.zipfile.ext import ZipExtFile
-from ziplet.zipfile.password import PasswordStatus
+import zipctl
+from zipctl import ZipFile
+from zipctl.cryptography import aes
+from zipctl.cryptography.aes import AesKeyCache, AesZipDecrypter
+from zipctl.exceptions import BadPassword
+from zipctl.zipfile.ext import ZipExtFile
+from zipctl.zipfile.password import PasswordStatus
 
 PASSWORD = b"correct horse"
 DATA = b"payload " * 500
@@ -24,7 +24,7 @@ DATA = b"payload " * 500
 @pytest.fixture
 def archive() -> bytes:
     buffer = io.BytesIO()
-    with ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(buffer, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(PASSWORD)
         zf.writestr("a.txt", DATA)
         zf.writestr("b.txt", DATA)

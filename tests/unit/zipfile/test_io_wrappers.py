@@ -6,7 +6,7 @@ from typing import IO
 
 import pytest
 
-from ziplet.zipfile.io_wrappers import ClosableZipStream, Tellable
+from zipctl.zipfile.io_wrappers import ClosableZipStream, Tellable
 
 # ---------------------------------------------------------------------------
 # Tellable

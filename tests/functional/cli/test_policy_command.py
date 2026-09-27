@@ -1,4 +1,4 @@
-"""``ziplet policy show`` and ``ziplet policy validate``."""
+"""``zipctl policy show`` and ``zipctl policy validate``."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tests.functional.cli.reports import (
     load_json,
 )
 from tests.functional.cli.support import write_archive
-from ziplet import ExtractPolicy, policy_from_json, policy_to_json
+from zipctl import ExtractPolicy, policy_from_json, policy_to_json
 
 README = Path(__file__).resolve().parents[3] / "README.md"
 
@@ -251,7 +251,7 @@ def test_every_policy_example_in_the_readme_validates(
     assert result.returncode == 0, result
 
 
-# --- ZIPLET_POLICY -----------------------------------------------------------------
+# --- ZIPCTL_POLICY -----------------------------------------------------------------
 
 
 def test_the_environment_policy_sits_between_the_defaults_and_the_options(
@@ -259,7 +259,7 @@ def test_the_environment_policy_sits_between_the_defaults_and_the_options(
 ) -> None:
     base = _write(workdir, '{"max_entries": 7, "max_member_size": 100}', "env.json")
     own = _write(workdir, '{"max_entries": 8}', "own.json")
-    env = {"ZIPLET_POLICY": str(base)}
+    env = {"ZIPCTL_POLICY": str(base)}
 
     alone = policy_from_json(cli("policy", "show", env=env).stdout)
     assert (alone.max_entries, alone.max_member_size) == (7, 100)
@@ -280,7 +280,7 @@ def test_the_environment_policy_applies_to_extraction_and_inspection(
 ) -> None:
     archive = write_archive(workdir / "a.zip", [("a.txt", b"1"), ("b.txt", b"2")])
     strict = _write(workdir, '{"max_entries": 1}', "strict.json")
-    env = {"ZIPLET_POLICY": str(strict)}
+    env = {"ZIPCTL_POLICY": str(strict)}
     assert cli("inspect", str(archive), env=env).returncode == 1
     assert (
         cli("extract", str(archive), "-d", str(workdir / "out"), env=env).returncode
@@ -302,7 +302,7 @@ def test_the_environment_policy_applies_to_extraction_and_inspection(
 def test_an_unusable_environment_policy_is_refused(
     cli: CliRunner, workdir: Path, value: str, message: str
 ) -> None:
-    result = cli("policy", "show", env={"ZIPLET_POLICY": value}, cwd=workdir)
+    result = cli("policy", "show", env={"ZIPCTL_POLICY": value}, cwd=workdir)
     assert result.returncode == 2, result
     assert message in result.stderr
 
@@ -311,9 +311,9 @@ def test_an_invalid_environment_policy_names_its_origin(
     cli: CliRunner, workdir: Path
 ) -> None:
     bad = _write(workdir, '{"max_entries": "many"}', "bad.json")
-    result = cli("policy", "show", env={"ZIPLET_POLICY": str(bad)})
+    result = cli("policy", "show", env={"ZIPCTL_POLICY": str(bad)})
     assert result.returncode == 2, result
-    assert f"invalid policy (ZIPLET_POLICY={bad})" in result.stderr
+    assert f"invalid policy (ZIPCTL_POLICY={bad})" in result.stderr
 
 
 def test_standard_input_that_is_not_utf8_is_a_usage_error(cli: CliRunner) -> None:

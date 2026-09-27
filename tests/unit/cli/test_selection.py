@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ziplet.cli.commands.helpers.collect import _arcname, _stored_name
-from ziplet.cli.commands.helpers.selection import glob_matcher, select
-from ziplet.cli.errors import CliError
+from zipctl.cli.commands.helpers.collect import _arcname, _stored_name
+from zipctl.cli.commands.helpers.selection import glob_matcher, select
+from zipctl.cli.errors import CliError
 
 NAMES = ["a.txt", "b.txt", "src/c.py", "src/d.py", "report[1].txt", "report1.txt"]
 

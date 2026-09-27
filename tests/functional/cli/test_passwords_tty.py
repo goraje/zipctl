@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.support import (
     HAS_PTY,
     PASSWORD,
@@ -15,7 +15,7 @@ from tests.functional.cli.support import (
     write_archive,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 pytestmark = pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
 
@@ -28,7 +28,7 @@ CAN_MASK = sys.version_info >= (3, 14)
 def _archive(workdir: Path, members: list[tuple[str, bytes]]) -> Path:
     """An AES archive where each member has its own password."""
     path = workdir / "per.zip"
-    with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
         for name, password in members:
             zf.writestr(name, BODY, password=password)
     return path
@@ -39,7 +39,7 @@ def shared(workdir: Path) -> Path:
     return write_archive(
         workdir / "shared.zip",
         [("a.txt", BODY), ("b.txt", BODY), ("c.txt", BODY)],
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
     )
 
@@ -142,7 +142,7 @@ def test_different_passwords_are_asked_once_each_and_then_remembered(
 def test_static_sources_and_prompts_work_together(workdir: Path) -> None:
     path = _archive(workdir, [("a.txt", b"pass-one"), ("b.txt", b"pass-two")])
     result, prompts = terminal(
-        "test", str(path), replies=["pass-two"], env={"ZIPLET_PASSWORD": "pass-one"}
+        "test", str(path), replies=["pass-two"], env={"ZIPCTL_PASSWORD": "pass-one"}
     )
     assert result.returncode == 0, result
     assert prompts == 1
@@ -174,7 +174,7 @@ def test_zipcrypto_prompts_work_too(workdir: Path) -> None:
     path = write_archive(
         workdir / "zc.zip",
         [("a.txt", BODY), ("b.txt", BODY)],
-        encryption=ziplet.ZIP_CRYPTO,
+        encryption=zipctl.ZIP_CRYPTO,
         password=PW,
     )
     result, prompts = terminal("test", str(path), replies=[PASSWORD])
@@ -203,7 +203,7 @@ def test_interrupting_a_prompt_exits_130_without_a_traceback(shared: Path) -> No
     result, prompts = terminal("test", str(shared), interrupt_at_prompt=1)
     assert result.returncode == 130, result
     assert prompts == 1
-    assert "ziplet: interrupted" in result.stderr
+    assert "zipctl: interrupted" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -218,7 +218,7 @@ def test_terminal_use_does_not_change_json_output_on_stdout(shared: Path) -> Non
 
 def test_special_names_do_not_break_the_prompt_flow(workdir: Path) -> None:
     path = workdir / "s.zip"
-    with ZipFile(path, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(path, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(PW)
         zf.writestr(special_info("dir/", 0o40755), b"", encryption=None)
         zf.writestr("dir/secret.txt", BODY)
@@ -228,13 +228,13 @@ def test_special_names_do_not_break_the_prompt_flow(workdir: Path) -> None:
 
 
 def test_password_prompt_ignores_the_environment_variable(shared: Path) -> None:
-    from_env = terminal("test", str(shared), env={"ZIPLET_PASSWORD": PASSWORD})
+    from_env = terminal("test", str(shared), env={"ZIPCTL_PASSWORD": PASSWORD})
     assert from_env[1] == 0
     result, prompts = terminal(
         "test",
         "--password-prompt",
         str(shared),
-        env={"ZIPLET_PASSWORD": PASSWORD},
+        env={"ZIPCTL_PASSWORD": PASSWORD},
         replies=[PASSWORD],
     )
     assert result.returncode == 0, result
@@ -251,7 +251,7 @@ def test_password_prompt_asks_for_a_new_password_despite_the_environment(
         "--password-prompt",
         str(source),
         str(out),
-        env={"ZIPLET_PASSWORD": "from the environment"},
+        env={"ZIPCTL_PASSWORD": "from the environment"},
         replies=[PASSWORD, PASSWORD],
     )
     assert result.returncode == 0, result
@@ -267,7 +267,7 @@ def test_password_prompt_makes_check_password_ask_despite_the_environment(
         "check-password",
         "--password-prompt",
         str(shared),
-        env={"ZIPLET_PASSWORD": "from the environment"},
+        env={"ZIPCTL_PASSWORD": "from the environment"},
         replies=[PASSWORD],
     )
     assert result.returncode == 0, result

@@ -1,4 +1,4 @@
-ziplet includes code derived from upstream projects with their own
+zipctl includes code derived from upstream projects with their own
 retained notices and license texts.
 
 Upstream sources
@@ -12,7 +12,7 @@ Upstream sources
    Copyright (c) 2017 Daniel Hillier
    Retained license text: `licenses/pyzipper-MIT.txt`
 
-3. JetBrains Mono Bold (lettering in `assets/ziplet-logo.svg`, converted to
+3. JetBrains Mono Bold (lettering in `assets/zipctl-logo.svg`, converted to
    outlines; the font itself is not distributed)
    Copyright 2020 The JetBrains Mono Project Authors
    (https://github.com/JetBrains/JetBrainsMono)
@@ -23,7 +23,7 @@ Brief summary of changes made to the CPython-derived code
 ---------------------------------------------------------
 
 This project refactors the CPython `zipfile` implementation into a dedicated
-package layout under `ziplet.zipfile`, adapts the code for this
+package layout under `zipctl.zipfile`, adapts the code for this
 standalone distribution, and extends it with additional encryption support,
 including WinZip AES integration and related interoperability tests.
 

@@ -8,9 +8,9 @@ from typing import TypeAlias, cast
 
 import pytest
 
-import ziplet
-from ziplet import ExtractPolicy, ExtractPolicyRule, ViolationAction
-from ziplet.zipfile.validators import extension_chains
+import zipctl
+from zipctl import ExtractPolicy, ExtractPolicyRule, ViolationAction
+from zipctl.zipfile.validators import extension_chains
 
 _Field: TypeAlias = frozenset[str] | ExtractPolicyRule[frozenset[str]] | None
 _Extensions: TypeAlias = Collection[str] | ExtractPolicyRule[frozenset[str]] | None
@@ -27,10 +27,10 @@ def _flagged(
 ) -> dict[str, set[str]]:
     """Assess *names* under *policy*; return {name: violation codes}."""
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         for name in names:
             zf.writestr(name, b"x")
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         assessment = zf.assess(tmp_path, policy)
     return {
         member.info.filename: {v.code for v in member.violations}
@@ -200,7 +200,7 @@ def test_rule_wrapper_controls_the_action_for_compound_extensions(
     tmp_path: Path,
 ) -> None:
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         zf.writestr("x.tar.gz", b"x")
     policy = replace(
         BASE_POLICY,
@@ -208,7 +208,7 @@ def test_rule_wrapper_controls_the_action_for_compound_extensions(
             frozenset({".tar.gz"}), ViolationAction.SKIP
         ),
     )
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         member = zf.assess(tmp_path, policy).members[0]
     (violation,) = member.violations
     assert violation.code == "extension_blocked"
@@ -218,16 +218,16 @@ def test_rule_wrapper_controls_the_action_for_compound_extensions(
 def test_compound_extension_rule_from_json_drives_real_extraction(
     tmp_path: Path,
 ) -> None:
-    policy = ziplet.policy_from_json(
+    policy = zipctl.policy_from_json(
         '{"blocked_extensions": [".tar.gz"], "on_violation": "skip",'
         ' "max_compression_ratio": null}'
     )
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         zf.writestr("keep.gz", b"1")
         zf.writestr("drop.tar.gz", b"2")
         zf.writestr("keep.txt", b"3")
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         result = zf.extractall(tmp_path, policy=policy)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.gz", "keep.txt"]

@@ -1,4 +1,4 @@
-"""``ziplet create``: collecting files, compression, replacing, atomicity."""
+"""``zipctl create``: collecting files, compression, replacing, atomicity."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from typing_extensions import Unpack
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import CreateReport, load_json
 from tests.functional.cli.support import Result, RunOptions
-from ziplet import ZipFile
-from ziplet.compression import registry
+from zipctl import ZipFile
+from zipctl.compression import registry
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="needs POSIX file types")
 
@@ -45,7 +45,7 @@ EXPECTED_DIRS = {"src/", "src/docs/", "src/docs/deep/", "src/empty/"}
 
 
 def contents(path: Path, password: bytes | None = None) -> dict[str, bytes]:
-    """Every file in the archive, read with ziplet itself."""
+    """Every file in the archive, read with zipctl itself."""
     with ZipFile(path) as zf:
         return {
             info.filename: zf.read(info, pwd=password)
@@ -60,11 +60,11 @@ def names(path: Path) -> list[str]:
 
 
 def leftovers(directory: Path) -> list[str]:
-    return sorted(p.name for p in directory.iterdir() if p.name.startswith(".ziplet-"))
+    return sorted(p.name for p in directory.iterdir() if p.name.startswith(".zipctl-"))
 
 
 def make(cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]) -> Result:
-    """``ziplet create out.zip ARGS``, run in *workdir* (where ``src`` lives)."""
+    """``zipctl create out.zip ARGS``, run in *workdir* (where ``src`` lives)."""
     kw.setdefault("cwd", workdir)
     return cli("create", str(workdir / "out.zip"), *args, **kw)
 
@@ -341,7 +341,7 @@ def test_every_compression_method(
     if code == 93 and registry._registry.get(93) is None:
         result = make(cli, workdir, "src", "--compression", "zstd")
         assert result.returncode == 2
-        assert "ziplet[zstd]" in result.stderr
+        assert "zipctl[zstd]" in result.stderr
         return
     result = make(cli, workdir, "src", "--compression", method)
     assert result.returncode == 0, result
@@ -558,7 +558,7 @@ def test_append_keeps_the_original_when_it_fails(
 def test_append_does_not_need_the_password_of_existing_encrypted_members(
     cli: CliRunner, workdir: Path, source: Path
 ) -> None:
-    env = {"ZIPLET_PASSWORD": "pw"}
+    env = {"ZIPCTL_PASSWORD": "pw"}
     assert (
         make(
             cli, workdir, "a.txt", "-C", str(source), "--encryption", "aes256", env=env
@@ -680,7 +680,7 @@ def test_the_help_lists_the_command(cli: CliRunner) -> None:
 def test_members_are_added_in_sorted_order_whatever_the_file_system_returns(
     workdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ziplet.cli import main
+    from zipctl.cli import main
 
     real_walk = os.walk
 
@@ -792,6 +792,6 @@ def test_a_replace_that_fails_is_reported_not_a_traceback(
     (workdir / "out.zip").mkdir()
     result = make(cli, workdir, "a.txt", "--force")
     assert result.returncode == 1, result
-    assert result.stderr.startswith("ziplet: error: cannot replace ")
+    assert result.stderr.startswith("zipctl: error: cannot replace ")
     assert "Traceback" not in result.stderr
     assert leftovers(workdir) == []

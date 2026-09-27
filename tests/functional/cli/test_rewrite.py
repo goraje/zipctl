@@ -1,4 +1,4 @@
-"""``ziplet rewrite``: change how an archive is protected or compressed."""
+"""``zipctl rewrite``: change how an archive is protected or compressed."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from typing_extensions import Unpack
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.rewrite_support import (
     OTHER,
@@ -24,18 +24,18 @@ from tests.functional.cli.rewrite_support import (
 )
 from tests.functional.cli.support import HAS_PTY, Result, RunOptions
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
-from ziplet.compression import registry
+from zipctl import ZipFile
+from zipctl.compression import registry
 
-OLD = {"ZIPLET_OLD_PASSWORD": PASSWORD}
-NEW = {"ZIPLET_PASSWORD": OTHER}
+OLD = {"ZIPCTL_OLD_PASSWORD": PASSWORD}
+NEW = {"ZIPCTL_PASSWORD": OTHER}
 BOTH = OLD | NEW
 needs_pty = pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
 COMPRESSION = {
-    "store": ziplet.ZIP_STORED,
-    "deflate": ziplet.ZIP_DEFLATED,
-    "bzip2": ziplet.ZIP_BZIP2,
-    "lzma": ziplet.ZIP_LZMA,
+    "store": zipctl.ZIP_STORED,
+    "deflate": zipctl.ZIP_DEFLATED,
+    "bzip2": zipctl.ZIP_BZIP2,
+    "lzma": zipctl.ZIP_LZMA,
 }
 
 
@@ -44,9 +44,9 @@ def secret(workdir: Path) -> Path:
     """The sample archive, AES-256, protected with PASSWORD."""
     return make_source(
         workdir / "in.zip",
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
-        extra=ziplet.ZipFileExtra(wz_aes_nbits=256),
+        extra=zipctl.ZipFileExtra(wz_aes_nbits=256),
     )
 
 
@@ -60,7 +60,7 @@ def rewrite(
 
 def matches(cli: CliRunner, archive: Path, password: str) -> bool:
     result = cli(
-        "check-password", "--full", str(archive), env={"ZIPLET_PASSWORD": password}
+        "check-password", "--full", str(archive), env={"ZIPCTL_PASSWORD": password}
     )
     return result.returncode == 0
 
@@ -112,7 +112,7 @@ def test_recompress_changes_every_files_method_and_keeps_the_protection(
 def test_recompress_level_changes_the_size(cli: CliRunner, workdir: Path) -> None:
     payload = bytes((i * 7) % 251 for i in range(4000)) * 30
     source = workdir / "in.zip"
-    with ZipFile(source, "w", compression=ziplet.ZIP_DEFLATED) as zf:
+    with ZipFile(source, "w", compression=zipctl.ZIP_DEFLATED) as zf:
         zf.writestr("data", payload)
     sizes = {}
     for level in ("1", "9"):
@@ -147,7 +147,7 @@ def test_a_bad_level_fails_cleanly(cli: CliRunner, workdir: Path) -> None:
 
 def zstd_installed() -> bool:
     try:
-        registry.check_compression(ziplet.ZIP_ZSTANDARD)
+        registry.check_compression(zipctl.ZIP_ZSTANDARD)
     except (RuntimeError, NotImplementedError):
         return False
     return True
@@ -160,7 +160,7 @@ def test_zstd_works_where_it_is_installed_and_is_refused_elsewhere(
     if zstd_installed():
         assert result.returncode == 0, result
         assert snapshot(workdir / "out.zip", PW) == {
-            name: (*row[:3], ziplet.ZIP_ZSTANDARD, *row[4:]) if not row[4] else row
+            name: (*row[:3], zipctl.ZIP_ZSTANDARD, *row[4:]) if not row[4] else row
             for name, row in snapshot(secret, PW).items()
         }
     else:
@@ -198,14 +198,14 @@ def test_the_algorithm_can_be_changed(
 ) -> None:
     if before == "zipcrypto":
         source = make_source(
-            workdir / "in.zip", encryption=ziplet.ZIP_CRYPTO, password=PW
+            workdir / "in.zip", encryption=zipctl.ZIP_CRYPTO, password=PW
         )
     else:
         source = make_source(
             workdir / "in.zip",
-            encryption=ziplet.WZ_AES,
+            encryption=zipctl.WZ_AES,
             password=PW,
-            extra=ziplet.ZipFileExtra(wz_aes_nbits=int(before[3:])),
+            extra=zipctl.ZipFileExtra(wz_aes_nbits=int(before[3:])),
         )
     result = rewrite(cli, workdir, "--encryption", after, env=BOTH)
     assert result.returncode == 0, result
@@ -217,9 +217,9 @@ def test_the_algorithm_can_be_changed(
 def test_the_aes_version_can_be_changed(cli: CliRunner, workdir: Path) -> None:
     make_source(
         workdir / "in.zip",
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PW,
-        extra=ziplet.ZipFileExtra(wz_aes_nbits=256, force_wz_aes_version=1),
+        extra=zipctl.ZipFileExtra(wz_aes_nbits=256, force_wz_aes_version=1),
     )
     assert set(schemes(workdir / "in.zip").values()) == {"aes256-v1"}
     result = rewrite(
@@ -270,7 +270,7 @@ def test_zipcrypto_warns(cli: CliRunner, workdir: Path) -> None:
 
 
 def test_keeping_zipcrypto_does_not_warn(cli: CliRunner, workdir: Path) -> None:
-    make_source(workdir / "in.zip", encryption=ziplet.ZIP_CRYPTO, password=PW)
+    make_source(workdir / "in.zip", encryption=zipctl.ZIP_CRYPTO, password=PW)
     result = rewrite(cli, workdir, env=OLD)
     assert result.returncode == 0, result
     assert result.stderr == ""
@@ -324,7 +324,7 @@ def test_both_passwords_cannot_come_from_standard_input(
 def test_the_new_password_variable_is_not_the_old_password(
     cli: CliRunner, workdir: Path
 ) -> None:
-    result = rewrite(cli, workdir, env={"ZIPLET_PASSWORD": PASSWORD})
+    result = rewrite(cli, workdir, env={"ZIPCTL_PASSWORD": PASSWORD})
     assert result.returncode == 1, result
     assert "password required" in result.stderr
     assert not (workdir / "out.zip").exists()
@@ -337,7 +337,7 @@ def test_a_wrong_old_password_writes_nothing(cli: CliRunner, workdir: Path) -> N
         workdir,
         "--encryption",
         "aes256",
-        env={**NEW, "ZIPLET_OLD_PASSWORD": "wrong"},
+        env={**NEW, "ZIPCTL_OLD_PASSWORD": "wrong"},
     )
     assert result.returncode == 1, result
     assert "wrong password" in result.stderr
@@ -544,7 +544,7 @@ def test_an_archive_with_two_passwords_is_read_with_two_prompts(
     assert {n: row[5] for n, row in after.items()} == {
         n: row[5] for n, row in before.items()
     }
-    assert {row[3] for row in after.values()} == {ziplet.ZIP_STORED}
+    assert {row[3] for row in after.values()} == {zipctl.ZIP_STORED}
 
 
 @pytest.mark.usefixtures("secret")

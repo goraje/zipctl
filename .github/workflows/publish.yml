@@ -52,12 +52,12 @@ jobs:
           import sys
 
           expected = sys.argv[1]
-          distributions = list(pathlib.Path("dist").glob("ziplet-*.whl"))
+          distributions = list(pathlib.Path("dist").glob("zipctl-*.whl"))
           if len(distributions) != 1:
               raise SystemExit(
                   f"Expected exactly one wheel, found {len(distributions)}"
               )
-          filename = distributions[0].name.removeprefix("ziplet-")
+          filename = distributions[0].name.removeprefix("zipctl-")
           version = filename.split("-", 1)[0]
           if version != expected:
               raise SystemExit(
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/ziplet/
+      url: https://pypi.org/project/zipctl/
     permissions:
       contents: read
       id-token: write

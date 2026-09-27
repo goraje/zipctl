@@ -1,4 +1,4 @@
-"""``ziplet list``: names, the long table, JSON, and failure modes."""
+"""``zipctl list``: names, the long table, JSON, and failure modes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import ListReport, load_json
 from tests.functional.cli.support import (
@@ -17,18 +17,18 @@ from tests.functional.cli.support import (
     special_info,
     write_archive,
 )
-from ziplet import ZipFile
-from ziplet.cli.output import human_size
-from ziplet.compression import registry
-from ziplet.zipfile.info import ZipInfo
+from zipctl import ZipFile
+from zipctl.cli.output import human_size
+from zipctl.compression import registry
+from zipctl.zipfile.info import ZipInfo
 
-DATA = b"hello ziplet " * 50
+DATA = b"hello zipctl " * 50
 
 
 @pytest.fixture
 def archive(workdir: Path) -> Path:
     path = workdir / "sample.zip"
-    with ZipFile(path, "w", compression=ziplet.ZIP_DEFLATED) as zf:
+    with ZipFile(path, "w", compression=zipctl.ZIP_DEFLATED) as zf:
         zf.mkdir("docs")
         zf.writestr("docs/readme.txt", DATA)
         zf.writestr("data.bin", bytes(range(256)) * 4)
@@ -131,7 +131,7 @@ def test_long_listing_shows_the_encryption_column_only_for_encrypted_archives(
     path = write_archive(
         workdir / "e.zip",
         [("s.txt", DATA)],
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=b"pw",
     )
     lines = cli("list", "-l", str(path)).stdout.splitlines()
@@ -140,7 +140,7 @@ def test_long_listing_shows_the_encryption_column_only_for_encrypted_archives(
 
 
 @pytest.mark.parametrize(
-    ("version", "crc"), [(ziplet.WZ_AES_V1, "00000000"), (ziplet.WZ_AES_V2, "-")]
+    ("version", "crc"), [(zipctl.WZ_AES_V1, "00000000"), (zipctl.WZ_AES_V2, "-")]
 )
 def test_long_listing_hides_the_crc_only_where_aes_2_does_not_store_it(
     cli: CliRunner, workdir: Path, version: int, crc: str
@@ -148,9 +148,9 @@ def test_long_listing_hides_the_crc_only_where_aes_2_does_not_store_it(
     path = write_archive(
         workdir / "e.zip",
         [("empty.txt", b"")],  # its real CRC-32 is 0, which is not "hidden"
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=b"pw",
-        extra=ziplet.ZipFileExtra(force_wz_aes_version=version),
+        extra=zipctl.ZipFileExtra(force_wz_aes_version=version),
     )
     row = cli("list", "-l", str(path)).stdout.splitlines()[1]
     assert row.split()[-2] == crc
@@ -182,15 +182,15 @@ def test_long_listing_columns_line_up(cli: CliRunner, archive: Path) -> None:
 
 
 COMPRESSIONS = [
-    (ziplet.ZIP_STORED, "store"),
-    (ziplet.ZIP_DEFLATED, "deflate"),
-    (ziplet.ZIP_BZIP2, "bzip2"),
-    (ziplet.ZIP_LZMA, "lzma"),
+    (zipctl.ZIP_STORED, "store"),
+    (zipctl.ZIP_DEFLATED, "deflate"),
+    (zipctl.ZIP_BZIP2, "bzip2"),
+    (zipctl.ZIP_LZMA, "lzma"),
     pytest.param(
-        ziplet.ZIP_ZSTANDARD,
+        zipctl.ZIP_ZSTANDARD,
         "zstd",
         marks=pytest.mark.skipif(
-            registry._registry.get(ziplet.ZIP_ZSTANDARD) is None,
+            registry._registry.get(zipctl.ZIP_ZSTANDARD) is None,
             reason="zstd is not available",
         ),
     ),
@@ -208,11 +208,11 @@ def test_every_compression_method_is_named(
 
 
 ENCRYPTIONS = [
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=128), "AES-128"),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=192), "AES-192"),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(wz_aes_nbits=256), "AES-256"),
-    (ziplet.WZ_AES, ziplet.ZipFileExtra(force_wz_aes_version=1), "AES-256"),
-    (ziplet.ZIP_CRYPTO, None, "ZipCrypto"),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=128), "AES-128"),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=192), "AES-192"),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(wz_aes_nbits=256), "AES-256"),
+    (zipctl.WZ_AES, zipctl.ZipFileExtra(force_wz_aes_version=1), "AES-256"),
+    (zipctl.ZIP_CRYPTO, None, "ZipCrypto"),
 ]
 
 
@@ -221,7 +221,7 @@ def test_every_encryption_scheme_is_named_without_needing_a_password(
     cli: CliRunner,
     workdir: Path,
     encryption: str,
-    extra: ziplet.ZipFileExtra | None,
+    extra: zipctl.ZipFileExtra | None,
     label: str,
 ) -> None:
     path = write_archive(
@@ -249,8 +249,8 @@ def test_compression_inside_an_aes_entry_is_reported_not_the_aes_marker(
     path = write_archive(
         workdir / "e.zip",
         [("s.txt", DATA)],
-        compression=ziplet.ZIP_DEFLATED,
-        encryption=ziplet.WZ_AES,
+        compression=zipctl.ZIP_DEFLATED,
+        encryption=zipctl.WZ_AES,
         password=b"pw",
     )
     record = load_json(cli("list", "--json", str(path)), ListReport)["members"][0]
@@ -305,7 +305,7 @@ def test_json_describes_the_archive_and_every_member(
 def test_saved_is_the_share_compression_removed(cli: CliRunner, workdir: Path) -> None:
     path = workdir / "s.zip"
     with ZipFile(path, "w") as zf:
-        zf.writestr("stored.txt", b"x" * 100, compress_type=ziplet.ZIP_STORED)
+        zf.writestr("stored.txt", b"x" * 100, compress_type=zipctl.ZIP_STORED)
     rows = cli("list", "-l", str(path)).stdout.splitlines()
     assert rows[1].split()[3] == "0%"
     assert load_json(cli("list", "--json", str(path)), ListReport)["ok"] is True
@@ -358,7 +358,7 @@ def test_missing_archive(cli: CliRunner, workdir: Path) -> None:
     result = cli("list", str(workdir / "nope.zip"))
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "ziplet: error: cannot open" in result.stderr
+    assert "zipctl: error: cannot open" in result.stderr
     assert "nope.zip" in result.stderr
     assert "Traceback" not in result.stderr
 
@@ -366,7 +366,7 @@ def test_missing_archive(cli: CliRunner, workdir: Path) -> None:
 def test_directory_instead_of_archive(cli: CliRunner, workdir: Path) -> None:
     result = cli("list", str(workdir))
     assert result.returncode == 1
-    assert "ziplet: error: cannot open" in result.stderr
+    assert "zipctl: error: cannot open" in result.stderr
     assert "Traceback" not in result.stderr
 
 

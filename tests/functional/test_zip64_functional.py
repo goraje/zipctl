@@ -1,7 +1,7 @@
 """Functional ZIP64 tests with tiny payloads via patched ZIP64 thresholds.
 
 These tests avoid giant files by monkeypatching ZIP64 limits in runtime modules.
-They validate ZIP64 behavior end-to-end (ziplet, stdlib, and 7-Zip).
+They validate ZIP64 behavior end-to-end (zipctl, stdlib, and 7-Zip).
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from unittest import mock
 
 import pytest
 
-from ziplet import ZipFile
-from ziplet.exceptions import LargeZipFile
-from ziplet.zipfile import file as file_mod
-from ziplet.zipfile import info as info_mod
-from ziplet.zipfile import records as records_mod
-from ziplet.zipfile.shared import (
+from zipctl import ZipFile
+from zipctl.exceptions import LargeZipFile
+from zipctl.zipfile import file as file_mod
+from zipctl.zipfile import info as info_mod
+from zipctl.zipfile import records as records_mod
+from zipctl.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_SIZE,
     CENTRAL_DIR_STRUCT,
@@ -132,7 +132,7 @@ class TestZip64Functional:
     ) -> None:
         """Cross-tool check for forced ZIP64 interoperability.
 
-        stdlib writes, ziplet reads, and 7z validates.
+        stdlib writes, zipctl reads, and 7z validates.
         """
         path = tmp_path / "stdlib-zip64.zip"
         with mock.patch.object(_stdlib_zipfile, "ZIP64_LIMIT", -1):

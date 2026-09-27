@@ -1,4 +1,4 @@
-"""``ziplet create``: --encryption, --protect and --encryption-spec."""
+"""``zipctl create``: --encryption, --protect and --encryption-spec."""
 
 from __future__ import annotations
 
@@ -19,12 +19,12 @@ from tests.functional.cli.support import (
     RunOptions,
 )
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
-from ziplet.cli.output import JsonValue
-from ziplet.zipfile.info import ZipInfo
+from zipctl import ZipFile
+from zipctl.cli.output import JsonValue
+from zipctl.zipfile.info import ZipInfo
 
 PW = PASSWORD.encode()
-ENV = {"ZIPLET_PASSWORD": PASSWORD}
+ENV = {"ZIPCTL_PASSWORD": PASSWORD}
 needs_pty = pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
 FILES = {
     "public/readme.txt": b"public readme",
@@ -47,7 +47,7 @@ def tree(workdir: Path) -> Path:
 def create(
     cli: CliRunner, workdir: Path, *args: str, **kw: Unpack[RunOptions]
 ) -> Result:
-    """``ziplet create out.zip . ARGS`` run inside the tree."""
+    """``zipctl create out.zip . ARGS`` run inside the tree."""
     kw.setdefault("cwd", workdir / "tree")
     return cli("create", str(workdir / "out.zip"), ".", *args, **kw)
 
@@ -74,7 +74,7 @@ def matches(cli: CliRunner, archive: Path, password: str, *members: str) -> bool
     """True if *password* is accepted by every encrypted (selected) member."""
     result = cli(
         "check-password", "--full", str(archive), *members,
-        env={"ZIPLET_PASSWORD": password},
+        env={"ZIPCTL_PASSWORD": password},
     )  # fmt: skip
     return result.returncode == 0
 
@@ -357,7 +357,7 @@ def test_a_mismatch_writes_nothing(workdir: Path) -> None:
     assert prompts == 2
     assert "the passwords do not match" in result.stderr
     assert not (workdir / "out.zip").exists()
-    assert list(workdir.glob(".ziplet-*")) == []
+    assert list(workdir.glob(".zipctl-*")) == []
 
 
 @pytest.mark.usefixtures("tree")
@@ -399,7 +399,7 @@ def test_interrupting_a_prompt_exits_130_and_leaves_nothing(workdir: Path) -> No
     assert result.returncode == 130, result
     assert "Traceback" not in result.stderr
     assert not (workdir / "out.zip").exists()
-    assert list(workdir.glob(".ziplet-*")) == []
+    assert list(workdir.glob(".zipctl-*")) == []
 
 
 # --- --protect
@@ -1027,9 +1027,9 @@ def test_the_readme_spec_example_is_valid(workdir: Path) -> None:
     import io
     import re
 
-    from ziplet.cli.commands.helpers.encryption.spec import plan_from_spec
-    from ziplet.cli.commands.helpers.passwords.sources import readers_for
-    from ziplet.cli.context import Context
+    from zipctl.cli.commands.helpers.encryption.spec import plan_from_spec
+    from zipctl.cli.commands.helpers.passwords.sources import readers_for
+    from zipctl.cli.context import Context
 
     readme = Path(__file__).resolve().parents[3] / "README.md"
     blocks = [
@@ -1040,7 +1040,7 @@ def test_the_readme_spec_example_is_valid(workdir: Path) -> None:
     vault = workdir / "vault"
     vault.write_bytes(b"secret\n")
     text = example.replace("/run/secrets/vault", str(vault).replace("\\", "\\\\"))
-    ctx = Context(io.StringIO(), io.StringIO(), io.StringIO(), {"ZIPLET_PASSWORD": "x"})
+    ctx = Context(io.StringIO(), io.StringIO(), io.StringIO(), {"ZIPCTL_PASSWORD": "x"})
     plan = plan_from_spec(text, "README", readers_for(ctx))
     assert [(r.pattern, r.method.name) for r in plan.rules] == [
         ("secrets/**", "aes256"),

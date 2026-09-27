@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from typing_extensions import override
 
-from ziplet.compression import (
+from zipctl.compression import (
     ZIP_BZIP2,
     ZIP_DEFLATED,
     ZIP_LZMA,
@@ -150,9 +150,9 @@ class TestSubmoduleImport:
     @pytest.mark.parametrize(
         ("method", "backing_module", "submodule"),
         [
-            (ZIP_DEFLATED, "zlib", "ziplet.compression.deflate"),
-            (ZIP_BZIP2, "bz2", "ziplet.compression.bz2"),
-            (ZIP_LZMA, "lzma", "ziplet.compression.lzma"),
+            (ZIP_DEFLATED, "zlib", "zipctl.compression.deflate"),
+            (ZIP_BZIP2, "bz2", "zipctl.compression.bz2"),
+            (ZIP_LZMA, "lzma", "zipctl.compression.lzma"),
         ],
     )
     def test_skips_registration_when_backing_module_absent(

@@ -1,5 +1,5 @@
 [project]
-name = "ziplet"
+name = "zipctl"
 dynamic = ["version"]
 authors = [
     { name = "Jerzy Góra", email = "goraje@users.noreply.github.com" },
@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ziplet = "ziplet.cli:main"
+zipctl = "zipctl.cli:main"
 
 [project.optional-dependencies]
 zstd = ["backports.zstd>=1.0.0; python_version < '3.14'"]
@@ -79,18 +79,18 @@ max-complexity = 10
 
 # The library never imports the CLI; only the CLI, __main__ and tests may.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"ziplet.cli".msg = "the library must not import the CLI"
+"zipctl.cli".msg = "the library must not import the CLI"
 
 [tool.ruff.lint.per-file-ignores]
-"src/ziplet/cli/**" = ["TID251"]
-"src/ziplet/__main__.py" = ["TID251"]
+"src/zipctl/cli/**" = ["TID251"]
+"src/zipctl/__main__.py" = ["TID251"]
 "tests/**" = ["TID251", "SLF001"]
 # Private access is normal inside the library; SLF001 only guards the CLI.
-"src/ziplet/{zipfile,compression,cryptography}/**" = ["SLF001"]
-"src/ziplet/{__init__,exceptions}.py" = ["SLF001"]
+"src/zipctl/{zipfile,compression,cryptography}/**" = ["SLF001"]
+"src/zipctl/{__init__,exceptions}.py" = ["SLF001"]
 # argparse has no public API for what these three files customise.
-"src/ziplet/cli/{parser,formatter}.py" = ["SLF001"]
-"src/ziplet/cli/commands/helpers/command.py" = ["SLF001"]
+"src/zipctl/cli/{parser,formatter}.py" = ["SLF001"]
+"src/zipctl/cli/commands/helpers/command.py" = ["SLF001"]
 
 [tool.basedpyright]
 include = ["src", "tests"]

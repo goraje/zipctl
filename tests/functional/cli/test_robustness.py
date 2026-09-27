@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import ErrorReport, ListReport, load_json
 from tests.functional.cli.support import PASSWORD, data_offset, flip_byte, write_archive
@@ -78,7 +78,7 @@ def test_a_password_never_shows_up_in_any_output_stream(
     path = write_archive(
         workdir / "e.zip",
         [("a.txt", b"payload" * 20)],
-        encryption=ziplet.WZ_AES,
+        encryption=zipctl.WZ_AES,
         password=PASSWORD.encode(),
     )
     flip_byte(path, data_offset(path, "a.txt") + 25)
@@ -92,7 +92,7 @@ def test_a_password_never_shows_up_in_any_output_stream(
         ["test", "--password-stdin", str(path)],
     ]
     for args in variants:
-        result = cli(*args, stdin=PASSWORD + "\n", env={"ZIPLET_PASSWORD": PASSWORD})
+        result = cli(*args, stdin=PASSWORD + "\n", env={"ZIPCTL_PASSWORD": PASSWORD})
         assert PASSWORD not in result.stdout + result.stderr, args
 
 
@@ -135,4 +135,4 @@ def test_a_failure_under_json_is_a_document_on_standard_output(
     assert document["ok"] is False
     assert document["code"] == 1
     assert "missing.zip" in document["error"]
-    assert result.stderr.startswith("ziplet: error: ")
+    assert result.stderr.startswith("zipctl: error: ")

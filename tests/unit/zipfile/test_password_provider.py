@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
-from ziplet import (
+import zipctl
+from zipctl import (
     BadPassword,
     ExtractPolicy,
     MemberStatus,
     PasswordRequired,
     ZipFile,
 )
-from ziplet.zipfile.info import ZipInfo
+from zipctl.zipfile.info import ZipInfo
 
 PASSWORDS = {"alpha.txt": b"pass-alpha", "beta.txt": b"pass-beta"}
 
@@ -22,7 +22,7 @@ PASSWORDS = {"alpha.txt": b"pass-alpha", "beta.txt": b"pass-beta"}
 @pytest.fixture
 def archive() -> bytes:
     buffer = io.BytesIO()
-    with ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(buffer, "w", encryption=zipctl.WZ_AES) as zf:
         zf.writestr("alpha.txt", b"alpha data", password=PASSWORDS["alpha.txt"])
         zf.writestr("beta.txt", b"beta data", password=PASSWORDS["beta.txt"])
         zf.writestr("plain.txt", b"plain data", encryption=None)
@@ -82,10 +82,10 @@ def test_policy_extraction_uses_the_provider(archive: bytes, tmp_path: Path) -> 
 def test_provider_works_together_with_progress_callbacks(
     archive: bytes, tmp_path: Path
 ) -> None:
-    events: list[ziplet.ProgressEvent] = []
+    events: list[zipctl.ProgressEvent] = []
     with ZipFile(io.BytesIO(archive)) as zf:
         zf.extractall(tmp_path, pwd=Provider(), progress=events.append)
-    finished = [e.member for e in events if e.phase == ziplet.ProgressPhase.FINISH]
+    finished = [e.member for e in events if e.phase == zipctl.ProgressPhase.FINISH]
     assert finished == ["alpha.txt", "beta.txt", "plain.txt"]
 
 
@@ -105,7 +105,7 @@ def test_a_missing_password_fails_only_that_member_under_a_policy(
 ) -> None:
     provider = Provider({"alpha.txt": PASSWORDS["alpha.txt"]})
     with ZipFile(io.BytesIO(archive)) as zf:
-        with pytest.raises(ziplet.ExtractionError) as excinfo:
+        with pytest.raises(zipctl.ExtractionError) as excinfo:
             zf.extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
     statuses = {m.member: m.status for m in excinfo.value.result.members}
     assert statuses == {
@@ -130,7 +130,7 @@ def test_a_provider_can_raise_its_own_password_error(
         raise BadPassword(f"no key for {info.filename}")
 
     with ZipFile(io.BytesIO(archive)) as zf:
-        with pytest.raises(ziplet.ExtractionError) as excinfo:
+        with pytest.raises(zipctl.ExtractionError) as excinfo:
             zf.extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
     messages = {
         m.member: m.violations[0].message
@@ -155,7 +155,7 @@ def test_plain_bytes_passwords_and_the_archive_password_still_work(
     tmp_path: Path,
 ) -> None:
     buffer = io.BytesIO()
-    with ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
+    with ZipFile(buffer, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(b"shared")
         zf.writestr("a.txt", b"a")
         zf.writestr("b.txt", b"b")

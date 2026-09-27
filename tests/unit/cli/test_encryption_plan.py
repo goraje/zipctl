@@ -10,17 +10,17 @@ import pytest
 from typing_extensions import override
 
 from tests.unit.cli.conftest import new_context
-from ziplet.cli.commands.helpers.encryption.options import _split_protect
-from ziplet.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
-from ziplet.cli.commands.helpers.encryption.spec import plan_from_spec
-from ziplet.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.encryption.options import _split_protect
+from zipctl.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
+from zipctl.cli.commands.helpers.encryption.spec import plan_from_spec
+from zipctl.cli.commands.helpers.passwords.sources import (
     PasswordReaders,
     readers_for,
 )
-from ziplet.cli.context import Context
-from ziplet.cli.errors import CliError
-from ziplet.cli.methods import ENCRYPTION_METHODS
-from ziplet.cli.output import JsonValue
+from zipctl.cli.context import Context
+from zipctl.cli.errors import CliError
+from zipctl.cli.methods import ENCRYPTION_METHODS
+from zipctl.cli.output import JsonValue
 
 
 @pytest.mark.parametrize(

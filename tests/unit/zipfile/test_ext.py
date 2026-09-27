@@ -5,12 +5,12 @@ from typing import cast
 
 import pytest
 
-from ziplet.cryptography.aes import AesZipDecrypter
-from ziplet.cryptography.zipcrypto import ZipCryptoDecrypter
-from ziplet.exceptions import PasswordRequired
-from ziplet.zipfile.ext import ZipExtFile
-from ziplet.zipfile.info import WzAesExtra, ZipInfo
-from ziplet.zipfile.io_wrappers import ClosableZipStream
+from zipctl.cryptography.aes import AesZipDecrypter
+from zipctl.cryptography.zipcrypto import ZipCryptoDecrypter
+from zipctl.exceptions import PasswordRequired
+from zipctl.zipfile.ext import ZipExtFile
+from zipctl.zipfile.info import WzAesExtra, ZipInfo
+from zipctl.zipfile.io_wrappers import ClosableZipStream
 
 
 def _stream(data: bytes = b"") -> ClosableZipStream:

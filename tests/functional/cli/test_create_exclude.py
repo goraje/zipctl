@@ -1,4 +1,4 @@
-"""``ziplet create --exclude`` and ``--dry-run``."""
+"""``zipctl create --exclude`` and ``--dry-run``."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.reports import CreateReport, load_json
 from tests.functional.cli.support import PASSWORD, Result
-from ziplet import ZipFile
+from zipctl import ZipFile
 
 
 @pytest.fixture
@@ -146,7 +146,7 @@ def test_dry_run_shows_the_protection_each_file_would_get(
     result = cli(
         "create", "out.zip", "proj/pkg", "-n", "--encryption", "aes256",
         "--protect", "**/*.pyc=none",
-        env={"ZIPLET_PASSWORD": PASSWORD}, cwd=workdir,
+        env={"ZIPCTL_PASSWORD": PASSWORD}, cwd=workdir,
     )  # fmt: skip
     assert result.returncode == 0, result
     assert "Would add: proj/pkg/mod.py (deflate, AES-256)" in result.stdout
@@ -173,7 +173,7 @@ def test_dry_run_json(cli: CliRunner, workdir: Path) -> None:
 def test_dry_run_json_names_the_encryption_as_a_real_run_does(
     cli: CliRunner, workdir: Path
 ) -> None:
-    env = {"ZIPLET_PASSWORD": PASSWORD}
+    env = {"ZIPCTL_PASSWORD": PASSWORD}
     args = ("proj/pkg", "--json", "--encryption", "aes256")
     dry = cli("create", "out.zip", *args, "-n", env=env, cwd=workdir)
     real = cli("create", "out.zip", *args, env=env, cwd=workdir)

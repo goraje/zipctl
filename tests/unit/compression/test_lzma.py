@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-from ziplet.compression import lzma
-from ziplet.compression.methods import (
+from zipctl.compression import lzma
+from zipctl.compression.methods import (
     CompressionEntry,
     CompressorBase,
     DecompressorBase,

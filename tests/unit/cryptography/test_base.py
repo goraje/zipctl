@@ -5,8 +5,8 @@ import io
 import pytest
 from typing_extensions import override
 
-from ziplet.cryptography.base import BaseZipDecrypter, BaseZipEncryptor
-from ziplet.exceptions import BadZipFile
+from zipctl.cryptography.base import BaseZipDecrypter, BaseZipEncryptor
+from zipctl.exceptions import BadZipFile
 
 
 class TestBaseZipDecrypter:

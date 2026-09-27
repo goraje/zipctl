@@ -10,12 +10,12 @@ from typing import NoReturn, cast
 
 import pytest
 
-import ziplet
-from ziplet import ZipFile
-from ziplet.compression import registry
-from ziplet.exceptions import BadZipFile
-from ziplet.zipfile.ext import ZipExtFile
-from ziplet.zipfile.info import ZipInfo
+import zipctl
+from zipctl import ZipFile
+from zipctl.compression import registry
+from zipctl.exceptions import BadZipFile
+from zipctl.zipfile.ext import ZipExtFile
+from zipctl.zipfile.info import ZipInfo
 
 PASSWORD = b"correct horse"
 OTHER = b"staple"
@@ -30,14 +30,14 @@ DATA_SIZE = len(DATA)
 # name -> (scheme, AES version); the password is PASSWORD for every encrypted one
 PROTECTIONS: dict[str, tuple[str | None, int | None]] = {
     "plain": (None, None),
-    "zipcrypto": (ziplet.ZIP_CRYPTO, None),
-    "aes1": (ziplet.WZ_AES, 1),
-    "aes2": (ziplet.WZ_AES, 2),
+    "zipcrypto": (zipctl.ZIP_CRYPTO, None),
+    "aes1": (zipctl.WZ_AES, 1),
+    "aes2": (zipctl.WZ_AES, 2),
 }
 
 
 def make(
-    protection: str, compression: int = ziplet.ZIP_DEFLATED, level: int = 9
+    protection: str, compression: int = zipctl.ZIP_DEFLATED, level: int = 9
 ) -> bytes:
     scheme, version = PROTECTIONS[protection]
     buffer = io.BytesIO()
@@ -50,7 +50,7 @@ def make(
             DATA,
             encryption=scheme,
             password=PASSWORD if scheme else None,
-            extra=ziplet.ZipFileExtra(force_wz_aes_version=version)
+            extra=zipctl.ZipFileExtra(force_wz_aes_version=version)
             if version
             else None,
         )
@@ -88,7 +88,7 @@ def copy(source: bytes, target: str, *, crc: int = CRC, size: int = DATA_SIZE) -
             pwd=PASSWORD,
             encryption=scheme,
             password=OTHER if scheme else None,
-            extra=ziplet.ZipFileExtra(force_wz_aes_version=version)
+            extra=zipctl.ZipFileExtra(force_wz_aes_version=version)
             if version
             else None,
         )
@@ -144,13 +144,13 @@ def test_a_tampered_aes_member_is_refused() -> None:
 def test_the_wrong_password_is_refused() -> None:
     with ZipFile(io.BytesIO(make("aes2"))) as src, ZipFile(io.BytesIO(), "w") as dst:
         info = src.infolist()[0]
-        with pytest.raises(ziplet.BadPassword):
+        with pytest.raises(zipctl.BadPassword):
             dst._copy_raw(
                 src, info, ZipInfo("f.bin"), crc=0, size=len(DATA), pwd=b"nope"
             )
 
 
-@pytest.mark.parametrize("compression", [ziplet.ZIP_BZIP2, ziplet.ZIP_LZMA])
+@pytest.mark.parametrize("compression", [zipctl.ZIP_BZIP2, zipctl.ZIP_LZMA])
 def test_other_compression_methods_are_copied_too(compression: int) -> None:
     copied = copy(make("plain", compression, level=6), "aes2")
     with ZipFile(io.BytesIO(copied)) as zf:
@@ -159,7 +159,7 @@ def test_other_compression_methods_are_copied_too(compression: int) -> None:
 
 
 def test_the_compression_option_bits_come_from_the_source() -> None:
-    source = make("plain", ziplet.ZIP_LZMA, level=6)
+    source = make("plain", zipctl.ZIP_LZMA, level=6)
     out = io.BytesIO()
     with ZipFile(io.BytesIO(source)) as src, ZipFile(out, "w") as dst:
         info = src.infolist()[0]

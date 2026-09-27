@@ -1,0 +1,70 @@
+"""The ``decrypt`` command."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from zipctl.cli.archive import open_archive
+from zipctl.cli.commands.helpers.command import Subparsers, add_command
+from zipctl.cli.commands.helpers.copying.copy import read_passwords, run_copy
+from zipctl.cli.commands.helpers.copying.options import (
+    CopyArgs,
+    add_copy_options,
+    check_paths,
+    copy_job,
+)
+from zipctl.cli.commands.helpers.copying.targets import PLAIN, keep_target
+from zipctl.cli.commands.helpers.passwords.options import (
+    PasswordArgs,
+    PasswordOptions,
+    add_password_options,
+    password_pool,
+)
+from zipctl.cli.commands.helpers.selection import select
+from zipctl.cli.context import Context
+from zipctl.cli.errors import CliError
+from zipctl.cli.output import printable
+
+
+class DecryptArgs(CopyArgs, PasswordArgs, Protocol):
+    match: list[str]
+
+
+def cmd_decrypt(args: DecryptArgs, ctx: Context) -> int:
+    job = copy_job(args)
+    check_paths(job)
+    with open_archive(job.input) as src:
+        infos = src.infolist()
+        encrypted = [info.filename for info in infos if info.is_encrypted]
+        if not encrypted:
+            raise CliError(f"{printable(job.input)} has no encrypted members")
+        chosen = select(encrypted, args.match, "encrypted member")
+        passwords = read_passwords(
+            src, infos, password_pool(PasswordOptions.from_args(args), ctx)
+        )
+        targets = [
+            PLAIN
+            if not info.is_encrypted or info.filename in chosen
+            else keep_target(info, password)
+            for info, password in zip(infos, passwords, strict=True)
+        ]
+        return run_copy(ctx, src, passwords, targets, job, verb="Decrypted")
+
+
+def register(subparsers: Subparsers) -> None:
+    parser = add_command(
+        subparsers,
+        "decrypt",
+        cmd_decrypt,
+        "copy an encrypted archive into a new, unencrypted one",
+    )
+    add_copy_options(parser)
+    parser.add_argument(
+        "--match",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Decrypt only members matching GLOB, leave the others encrypted. "
+        "Repeatable",
+    )
+    add_password_options(parser)

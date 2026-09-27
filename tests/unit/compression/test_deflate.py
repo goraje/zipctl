@@ -7,8 +7,8 @@ import zlib
 
 import pytest
 
-from ziplet.compression import deflate
-from ziplet.compression.methods import CompressorBase, StreamingDecompressor
+from zipctl.compression import deflate
+from zipctl.compression.methods import CompressorBase, StreamingDecompressor
 
 pytestmark = pytest.mark.skipif(
     deflate.compression_entry is None,

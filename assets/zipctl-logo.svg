@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 34 282 66" role="img" aria-labelledby="title desc">
+  <title id="title">zipctl logo</title>
+  <desc id="desc">A macOS-style blue app icon showing square brackets around a dot, next to the zipctl wordmark.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4aa0ff"/>
+      <stop offset="55%" stop-color="#1f66f0"/>
+      <stop offset="100%" stop-color="#0b2a86"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#eafcff"/>
+      <stop offset="100%" stop-color="#7fd8ff"/>
+    </linearGradient>
+    <filter id="emboss" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#5ad2ff" flood-opacity="0.75"/>
+    </filter>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="1.3" flood-color="#0b2a86" flood-opacity="0.55"/>
+    </filter>
+    <linearGradient id="word" x1="100" y1="46" x2="300" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2b6ae5"/>
+      <stop offset="100%" stop-color="#1d4db9"/>
+    </linearGradient>
+    <linearGradient id="wordv" x1="0" y1="46" x2="0" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3d7cf2"/>
+      <stop offset="100%" stop-color="#1a48b4"/>
+    </linearGradient>
+    <filter id="wordlift" x="-3%" y="-10%" width="106%" height="125%">
+      <feDropShadow dx="0" dy="0.9" stdDeviation="0.7" flood-color="#0b2a86" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <g transform="translate(10 39) scale(0.56)">
+    <rect width="100" height="100" rx="22.4" fill="url(#tile)" filter="url(#lift)"/>
+    <rect width="100" height="100" rx="22.4" fill="url(#gloss)" opacity="0.5"/>
+    <rect x="0.6" y="0.6" width="98.8" height="98.8" rx="21.8" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="1.2"/>
+    <g filter="url(#emboss)"><path d="M41 25H23V75H41M59 25H77V75H59" fill="none" stroke="url(#ink)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="50" r="9.5" fill="url(#ink)"/></g>
+  </g>
+  <g transform="translate(-22 0)" filter="url(#wordlift)">
+    <path d="M103.79 88V82.43L117.86 58.38H104.13V52.96H124.48V58.53L110.37 82.58H125.01V88Z M133.12 88V82.58H140.18V58.38H133.12V52.96H153.28V58.38H146.22V82.58H153.28V88Z M161.3 88V52.96H172.96Q176.46 52.96 179.08 54.3Q181.7 55.65 183.14 58.07Q184.58 60.5 184.58 63.76Q184.58 67.02 183.14 69.45Q181.7 71.87 179.08 73.22Q176.46 74.56 172.96 74.56H167.3V88ZM167.3 69.28H172.96Q175.5 69.28 176.99 67.74Q178.48 66.21 178.48 63.76Q178.48 61.31 176.99 59.78Q175.5 58.24 172.96 58.24H167.3Z M201.18 88.48Q197.78 88.48 195.28 87.21Q192.78 85.94 191.42 83.61Q190.05 81.28 190.05 78.11V62.85Q190.05 59.68 191.42 57.35Q192.78 55.02 195.28 53.75Q197.78 52.48 201.18 52.48Q204.54 52.48 207.04 53.75Q209.54 55.02 210.93 57.35Q212.32 59.68 212.32 62.85H206.27Q206.27 60.4 204.95 59.08Q203.63 57.76 201.18 57.76Q198.74 57.76 197.39 59.08Q196.05 60.4 196.05 62.85V78.11Q196.05 80.56 197.39 81.88Q198.74 83.2 201.18 83.2Q203.63 83.2 204.95 81.88Q206.27 80.56 206.27 78.11H212.32Q212.32 81.28 210.93 83.61Q209.54 85.94 207.04 87.21Q204.54 88.48 201.18 88.48Z M226.58 88V58.38H217.41V52.96H241.79V58.38H232.62V88Z M249.81 88V52.96H255.81V82.58H270.69V88Z" fill="url(#wordv)"/>
+  </g>
+</svg>

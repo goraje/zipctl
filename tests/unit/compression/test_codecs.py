@@ -6,8 +6,8 @@ from typing import Protocol, cast
 
 import pytest
 
-from ziplet.compression import bz2, deflate, lzma, zstd
-from ziplet.compression.methods import (
+from zipctl.compression import bz2, deflate, lzma, zstd
+from zipctl.compression.methods import (
     ZIP_BZIP2,
     ZIP_DEFLATED,
     ZIP_LZMA,

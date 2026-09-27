@@ -1,4 +1,4 @@
-"""``ziplet decrypt``: an encrypted archive in, an unencrypted copy out."""
+"""``zipctl decrypt``: an encrypted archive in, an unencrypted copy out."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typing_extensions import Unpack
 
-import ziplet
+import zipctl
 from tests.functional.cli.conftest import CliRunner
 from tests.functional.cli.rewrite_support import (
     OTHER,
@@ -22,11 +22,11 @@ from tests.functional.cli.rewrite_support import (
 )
 from tests.functional.cli.support import HAS_PTY, Result, RunOptions, write_archive
 from tests.functional.cli.support import run_in_terminal as terminal
-from ziplet import ZipFile
+from zipctl import ZipFile
 
-ENV = {"ZIPLET_PASSWORD": PASSWORD}
+ENV = {"ZIPCTL_PASSWORD": PASSWORD}
 needs_pty = pytest.mark.skipif(not HAS_PTY, reason="needs a POSIX pseudo-terminal")
-WZ_AES = ziplet.WZ_AES
+WZ_AES = zipctl.WZ_AES
 
 
 def encrypted_source(
@@ -34,14 +34,14 @@ def encrypted_source(
 ) -> Path:
     if method == "zipcrypto":
         return make_source(
-            workdir / "in.zip", encryption=ziplet.ZIP_CRYPTO, password=PW
+            workdir / "in.zip", encryption=zipctl.ZIP_CRYPTO, password=PW
         )
     bits = int(method[3:])
     return make_source(
         workdir / "in.zip",
         encryption=WZ_AES,
         password=PW,
-        extra=ziplet.ZipFileExtra(wz_aes_nbits=bits, force_wz_aes_version=version),
+        extra=zipctl.ZipFileExtra(wz_aes_nbits=bits, force_wz_aes_version=version),
     )
 
 
@@ -104,7 +104,7 @@ def test_password_from_standard_input(cli: CliRunner, workdir: Path) -> None:
 
 def test_a_wrong_password_writes_nothing(cli: CliRunner, workdir: Path) -> None:
     encrypted_source(workdir)
-    result = decrypt(cli, workdir, env={"ZIPLET_PASSWORD": "wrong"})
+    result = decrypt(cli, workdir, env={"ZIPCTL_PASSWORD": "wrong"})
     assert result.returncode == 1, result
     assert "wrong password" in result.stderr
     assert "docs/readme.txt" in result.stderr
@@ -126,7 +126,7 @@ def test_the_old_password_variable_is_not_used_here(
     cli: CliRunner, workdir: Path
 ) -> None:
     encrypted_source(workdir)
-    result = decrypt(cli, workdir, env={"ZIPLET_OLD_PASSWORD": PASSWORD})
+    result = decrypt(cli, workdir, env={"ZIPCTL_OLD_PASSWORD": PASSWORD})
     assert result.returncode == 1, result
 
 
@@ -204,7 +204,7 @@ def test_interrupting_leaves_nothing(workdir: Path) -> None:
 def test_plain_members_stay_plain(cli: CliRunner, workdir: Path) -> None:
     write_archive(
         workdir / "in.zip", [("one", b"1")], encryption=WZ_AES, password=PW,
-        extra=ziplet.ZipFileExtra(wz_aes_nbits=256),
+        extra=zipctl.ZipFileExtra(wz_aes_nbits=256),
     )  # fmt: skip
     with ZipFile(workdir / "in.zip", "a") as zf:
         zf.writestr("two", b"2")
@@ -274,12 +274,12 @@ def single_password_mix(path: Path) -> Path:
                 name.encode() * 50,
                 encryption=WZ_AES,
                 password=PW,
-                extra=ziplet.ZipFileExtra(
+                extra=zipctl.ZipFileExtra(
                     wz_aes_nbits=bits, force_wz_aes_version=version
                 ),
             )
         zf.writestr("c.txt", b"charlie")
-        zf.writestr("d.txt", b"delta" * 50, encryption=ziplet.ZIP_CRYPTO, password=PW)
+        zf.writestr("d.txt", b"delta" * 50, encryption=zipctl.ZIP_CRYPTO, password=PW)
     return path
 
 

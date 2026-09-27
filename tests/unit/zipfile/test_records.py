@@ -5,18 +5,18 @@ import struct
 
 import pytest
 
-import ziplet
-from ziplet.exceptions import BadZipFile, LargeZipFile
-from ziplet.zipfile import records
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.records import (
+import zipctl
+from zipctl.exceptions import BadZipFile, LargeZipFile
+from zipctl.zipfile import records
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.records import (
     looks_like_zip,
     raise_for_unsupported_flags,
     read_directory,
     read_end_record,
     write_directory,
 )
-from ziplet.zipfile.shared import (
+from zipctl.zipfile.shared import (
     END_ARCHIVE64_LOCATOR_SIGNATURE,
     MASK_COMPRESSED_PATCH,
     MASK_STRONG_ENCRYPTION,
@@ -25,7 +25,7 @@ from ziplet.zipfile.shared import (
 
 def _archive(names: tuple[str, ...] = ("a.txt",), comment: bytes = b"") -> bytes:
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w") as zf:
+    with zipctl.ZipFile(buffer, "w") as zf:
         for name in names:
             zf.writestr(name, name.encode())
         zf.comment = comment
@@ -65,7 +65,7 @@ def test_prepended_data_is_accounted_for() -> None:
     record = read_end_record(io.BytesIO(data))
     assert record is not None
     assert record.prepended_bytes == len(prefix)
-    with ziplet.ZipFile(io.BytesIO(data)) as zf:
+    with zipctl.ZipFile(io.BytesIO(data)) as zf:
         assert zf.read("a.txt") == b"a.txt"
 
 
@@ -111,7 +111,7 @@ def test_zip64_end_records_round_trip() -> None:
     record = read_end_record(io.BytesIO(data))
     assert record is not None
     assert record.entries_total == 3
-    with ziplet.ZipFile(io.BytesIO(data)) as zf:
+    with zipctl.ZipFile(io.BytesIO(data)) as zf:
         assert zf.namelist() == ["a.txt", "b.txt", "c.txt"]
 
 
@@ -159,12 +159,12 @@ def _corrupt_local_header(offset_in_header: int, value: bytes) -> io.BytesIO:
 
 
 def test_local_header_bad_signature_is_rejected() -> None:
-    with ziplet.ZipFile(_corrupt_local_header(0, b"XXXX")) as zf:
+    with zipctl.ZipFile(_corrupt_local_header(0, b"XXXX")) as zf:
         with pytest.raises(BadZipFile, match="Bad magic number"):
             zf.read("a.txt")
 
 
 def test_local_header_name_mismatch_is_rejected() -> None:
-    with ziplet.ZipFile(_corrupt_local_header(30, b"z")) as zf:
+    with zipctl.ZipFile(_corrupt_local_header(30, b"z")) as zf:
         with pytest.raises(BadZipFile, match="differ"):
             zf.read("a.txt")

@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from ziplet.zipfile.secure_fs import SecureExtractionRoot
+from zipctl.zipfile.secure_fs import SecureExtractionRoot
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="requires dir_fd support")
 

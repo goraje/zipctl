@@ -11,7 +11,7 @@ import pytest
 from typing_extensions import override
 
 from tests.unit.cli.test_password_pool import FakeZip
-from ziplet.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.passwords.options import (
     OldPasswordArgs,
     PasswordArgs,
     PasswordOptions,
@@ -21,7 +21,7 @@ from ziplet.cli.commands.helpers.passwords.options import (
     old_password_pool,
     single_password,
 )
-from ziplet.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.passwords.sources import (
     ENV_VAR,
     OLD_ENV_VAR,
     prompt_new_password,
@@ -30,10 +30,10 @@ from ziplet.cli.commands.helpers.passwords.sources import (
     require_tty_for_prompt,
     static_passwords,
 )
-from ziplet.cli.context import Context
-from ziplet.cli.errors import EXIT_USAGE, UsageError
-from ziplet.zipfile.file import ZipFile
-from ziplet.zipfile.info import ZipInfo
+from zipctl.cli.context import Context
+from zipctl.cli.errors import EXIT_USAGE, UsageError
+from zipctl.zipfile.file import ZipFile
+from zipctl.zipfile.info import ZipInfo
 
 
 class _Terminal(io.StringIO):

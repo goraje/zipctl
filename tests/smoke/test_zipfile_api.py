@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-import ziplet
-from ziplet import ZipFile, ZipFileExtra, is_zipfile
-from ziplet.exceptions import BadZipFile
+import zipctl
+from zipctl import ZipFile, ZipFileExtra, is_zipfile
+from zipctl.exceptions import BadZipFile
 
 PASSWORD = b"Cefzuj-hetveg-xifve5"
 WRONG_PASSWORD = b"wrong-password"
@@ -78,7 +78,7 @@ class TestInMemoryZipFile:
 
     def test_encrypted_round_trip_in_memory(self) -> None:
         buf = io.BytesIO()
-        with ZipFile(buf, "w", encryption=ziplet.WZ_AES) as zf:
+        with ZipFile(buf, "w", encryption=zipctl.WZ_AES) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("f.txt", CONTENT)
         buf.seek(0)
@@ -256,7 +256,7 @@ class TestZipFileExtra:
     ) -> None:
         path = tmp_path / "nbits.zip"
         x = ZipFileExtra(wz_aes_nbits=nbits)
-        with ZipFile(path, "w", encryption=ziplet.WZ_AES, extra=x) as zf:
+        with ZipFile(path, "w", encryption=zipctl.WZ_AES, extra=x) as zf:
             zf.setpassword(PASSWORD)
             zf.writestr("f.txt", CONTENT)
         with ZipFile(path, "r") as zf:

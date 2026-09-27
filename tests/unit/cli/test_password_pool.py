@@ -6,10 +6,10 @@ from types import SimpleNamespace
 from typing import cast
 
 from tests.unit.cli.conftest import new_context
-from ziplet.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
-from ziplet.zipfile.file import ZipFile
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.password import (
+from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
+from zipctl.zipfile.file import ZipFile
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.password import (
     MemberPasswordCheck,
     PasswordCheckResult,
     PasswordStatus,

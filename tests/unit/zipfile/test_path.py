@@ -5,11 +5,11 @@ import pathlib
 
 import pytest
 
-import ziplet
-from ziplet import Path, ZipFile
-from ziplet.exceptions import BadPassword
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.path import CompleteDirs, FastLookup
+import zipctl
+from zipctl import Path, ZipFile
+from zipctl.exceptions import BadPassword
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.path import CompleteDirs, FastLookup
 
 
 def _make_archive(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -208,7 +208,7 @@ class TestReading:
     def test_open_with_password(self, tmp_path: pathlib.Path) -> None:
         archive = tmp_path / "encrypted.zip"
         password = b"correct-horse-battery-staple"
-        with ZipFile(archive, "w", encryption=ziplet.ZIP_CRYPTO) as zf:
+        with ZipFile(archive, "w", encryption=zipctl.ZIP_CRYPTO) as zf:
             zf.setpassword(password)
             zf.writestr("secret.txt", "top secret")
 
@@ -222,7 +222,7 @@ class TestReading:
     ) -> None:
         archive = tmp_path / "encrypted-default.zip"
         password = b"another-secret"
-        with ZipFile(archive, "w", encryption=ziplet.ZIP_CRYPTO) as zf:
+        with ZipFile(archive, "w", encryption=zipctl.ZIP_CRYPTO) as zf:
             zf.setpassword(password)
             zf.writestr("secret.txt", "top secret")
 
@@ -348,10 +348,10 @@ def test_read_aes_encrypted_member_through_path(
     def urandom(size: int) -> bytes:
         return bytes(size)
 
-    monkeypatch.setattr("ziplet.cryptography.aes.os.urandom", urandom)
+    monkeypatch.setattr("zipctl.cryptography.aes.os.urandom", urandom)
     archive = tmp_path / "secure.zip"
     password = b"hunter2-super-secret"
-    with ziplet.ZipFile(archive, "w", encryption=ziplet.WZ_AES) as zf:
+    with zipctl.ZipFile(archive, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(password)
         zf.writestr("confidential/plan.txt", "launch codes")
         zf.writestr("public/notice.txt", "nothing to see here", encryption=None)
@@ -377,7 +377,7 @@ def test_implied_directories_survive_round_trip_without_explicit_entries(
 ) -> None:
     archive = tmp_path / "implied.zip"
     # Intentionally omit directory entries; only files are written.
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("a/b/c/leaf.txt", "deep leaf")
 
     root = Path(archive)
@@ -393,6 +393,6 @@ def test_implied_directories_survive_round_trip_without_explicit_entries(
 
 def test_missing_path_is_not_a_symlink(tmp_path: pathlib.Path) -> None:
     archive = tmp_path / "missing.zip"
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("present.txt", b"payload")
     assert not (Path(archive) / "missing.txt").is_symlink()

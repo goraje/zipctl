@@ -12,16 +12,16 @@ from typing import cast
 import pytest
 from typing_extensions import override
 
-import ziplet
+import zipctl
 from tests.helpers import NonSeekableBytesIO
-from ziplet.compression import lzma, registry
-from ziplet.exceptions import BadZipFile, LargeZipFile
-from ziplet.zipfile.exceptions import ExtractionMaterializationError
-from ziplet.zipfile.ext import ZipExtFile
-from ziplet.zipfile.file import ZipFileExtra
-from ziplet.zipfile.info import ZipInfo
-from ziplet.zipfile.io_wrappers import ClosableZipStream
-from ziplet.zipfile.shared import (
+from zipctl.compression import lzma, registry
+from zipctl.exceptions import BadZipFile, LargeZipFile
+from zipctl.zipfile.exceptions import ExtractionMaterializationError
+from zipctl.zipfile.ext import ZipExtFile
+from zipctl.zipfile.file import ZipFileExtra
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.io_wrappers import ClosableZipStream
+from zipctl.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_SIZE,
     CENTRAL_DIR_STRUCT,
@@ -117,13 +117,13 @@ def _find_aes_metadata(archive: bytes) -> tuple[int, int, int, int]:
 @pytest.mark.parametrize(
     ("compression", "payload"),
     [
-        (ziplet.ZIP_STORED, b"small payload"),
-        (ziplet.ZIP_STORED, b"large payload " * 4096),
-        (ziplet.ZIP_DEFLATED, b"small payload"),
-        (ziplet.ZIP_DEFLATED, b"large payload " * 4096),
-        (ziplet.ZIP_BZIP2, b"large payload " * 4096),
-        (ziplet.ZIP_LZMA, b"large payload " * 4096),
-        (ziplet.ZIP_ZSTANDARD, b"large payload " * 4096),
+        (zipctl.ZIP_STORED, b"small payload"),
+        (zipctl.ZIP_STORED, b"large payload " * 4096),
+        (zipctl.ZIP_DEFLATED, b"small payload"),
+        (zipctl.ZIP_DEFLATED, b"large payload " * 4096),
+        (zipctl.ZIP_BZIP2, b"large payload " * 4096),
+        (zipctl.ZIP_LZMA, b"large payload " * 4096),
+        (zipctl.ZIP_ZSTANDARD, b"large payload " * 4096),
     ],
 )
 def test_read1_is_bounded_and_supports_split_reads(
@@ -135,10 +135,10 @@ def test_read1_is_bounded_and_supports_split_reads(
         pytest.skip("compression method unavailable")
 
     path = tmp_path / f"bounded-{compression}.zip"
-    with ziplet.ZipFile(path, "w", compression=compression) as zf:
+    with zipctl.ZipFile(path, "w", compression=compression) as zf:
         zf.writestr("payload.bin", payload)
 
-    with ziplet.ZipFile(path) as zf:
+    with zipctl.ZipFile(path) as zf:
         with cast(ZipExtFile, zf.open("payload.bin")) as source:  # pyright: ignore[reportInvalidCast]  # open() is typed IO[bytes]
             chunks: list[bytes] = []
             while True:
@@ -159,14 +159,14 @@ def test_read1_is_bounded_and_supports_split_reads(
 
 @pytest.mark.parametrize(
     "compression",
-    [ziplet.ZIP_DEFLATED, ziplet.ZIP_BZIP2, ziplet.ZIP_LZMA],
+    [zipctl.ZIP_DEFLATED, zipctl.ZIP_BZIP2, zipctl.ZIP_LZMA],
 )
 def test_truncated_compressed_member_raises(tmp_path: Path, compression: int) -> None:
     if not registry._registry.get(compression):
         pytest.skip("compression method unavailable")
 
     path = tmp_path / f"truncated-{compression}.zip"
-    with ziplet.ZipFile(path, "w", compression=compression) as zf:
+    with zipctl.ZipFile(path, "w", compression=compression) as zf:
         zf.writestr("payload.bin", random.Random(0).randbytes(4096))
     archive = bytearray(path.read_bytes())
 
@@ -178,14 +178,14 @@ def test_truncated_compressed_member_raises(tmp_path: Path, compression: int) ->
     struct.pack_into("<L", archive, 18, compress_size - 30)
     path.write_bytes(archive)
 
-    with ziplet.ZipFile(path) as zf:
+    with zipctl.ZipFile(path) as zf:
         with pytest.raises((BadZipFile, EOFError)):
             zf.read("payload.bin")
 
 
 def test_crc_mismatch_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "crc.zip"
-    with ziplet.ZipFile(path, "w") as zf:
+    with zipctl.ZipFile(path, "w") as zf:
         zf.writestr("payload.bin", b"payload")
     archive = bytearray(path.read_bytes())
     central_offset = archive.index(CENTRAL_DIR_SIGNATURE)
@@ -193,11 +193,11 @@ def test_crc_mismatch_is_detected(tmp_path: Path) -> None:
     path.write_bytes(archive)
 
     with pytest.raises(BadZipFile, match="Bad CRC-32"):
-        with ziplet.ZipFile(path) as zf:
+        with zipctl.ZipFile(path) as zf:
             zf.read("payload.bin")
 
 
-@pytest.mark.parametrize("compression", [ziplet.ZIP_STORED, ziplet.ZIP_DEFLATED])
+@pytest.mark.parametrize("compression", [zipctl.ZIP_STORED, zipctl.ZIP_DEFLATED])
 @pytest.mark.parametrize("payload", [b"x", b"x" * 8192])
 def test_aes_headers_have_consistent_v2_metadata(
     tmp_path: Path,
@@ -205,8 +205,8 @@ def test_aes_headers_have_consistent_v2_metadata(
     payload: bytes,
 ) -> None:
     path = tmp_path / f"aes-{compression}-{len(payload)}.zip"
-    with ziplet.ZipFile(
-        path, "w", compression=compression, encryption=ziplet.WZ_AES
+    with zipctl.ZipFile(
+        path, "w", compression=compression, encryption=zipctl.WZ_AES
     ) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", payload)
@@ -215,17 +215,17 @@ def test_aes_headers_have_consistent_v2_metadata(
         path.read_bytes()
     )
     assert local_crc == central_crc == 0
-    assert local_version == central_version == ziplet.WZ_AES_V2
+    assert local_version == central_version == zipctl.WZ_AES_V2
 
 
 def test_aes_v1_headers_preserve_crc(tmp_path: Path) -> None:
     path = tmp_path / "aes-v1.zip"
     payload = b"compatibility payload"
-    with ziplet.ZipFile(
+    with zipctl.ZipFile(
         path,
         "w",
-        encryption=ziplet.WZ_AES,
-        extra=ziplet.ZipFileExtra(force_wz_aes_version=1),
+        encryption=zipctl.WZ_AES,
+        extra=zipctl.ZipFileExtra(force_wz_aes_version=1),
     ) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", payload)
@@ -235,23 +235,23 @@ def test_aes_v1_headers_preserve_crc(tmp_path: Path) -> None:
     )
     assert local_crc == central_crc
     assert local_crc != 0
-    assert local_version == central_version == ziplet.WZ_AES_V1
+    assert local_version == central_version == zipctl.WZ_AES_V1
 
 
 def test_aes_output_works_on_non_seekable_stream() -> None:
     buffer = NonSeekableBytesIO()
-    with ziplet.ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
+    with zipctl.ZipFile(buffer, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", b"payload")
 
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         zf.setpassword(b"password")
         assert zf.read("payload.bin") == b"payload"
 
 
 def test_aes_v2_data_descriptor_zeroes_crc() -> None:
     buffer = NonSeekableBytesIO()
-    with ziplet.ZipFile(buffer, "w", encryption=ziplet.WZ_AES) as zf:
+    with zipctl.ZipFile(buffer, "w", encryption=zipctl.WZ_AES) as zf:
         zf.setpassword(b"password")
         zf.writestr("payload.bin", b"payload")
 
@@ -264,7 +264,7 @@ def test_aes_v2_data_descriptor_zeroes_crc() -> None:
 def _symlink_archive(path: Path, name: str, target: str) -> None:
     info = ZipInfo(name)
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
-    with ziplet.ZipFile(path, "w") as zf:
+    with zipctl.ZipFile(path, "w") as zf:
         zf.writestr(info, target)
 
 
@@ -277,7 +277,7 @@ def test_symlink_member_over_existing_directory_raises_extraction_error(
     dest = tmp_path / "dest"
     (dest / "victim").mkdir(parents=True)
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         with pytest.raises(ExtractionMaterializationError):
             zf.extractall(dest)
     assert (dest / "victim").is_dir()
@@ -287,12 +287,12 @@ def test_file_member_over_existing_directory_raises_extraction_error(
     tmp_path: Path,
 ) -> None:
     archive = tmp_path / "file.zip"
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("victim", b"data")
     dest = tmp_path / "dest"
     (dest / "victim").mkdir(parents=True)
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         with pytest.raises(ExtractionMaterializationError):
             zf.extractall(dest)
     assert (dest / "victim").is_dir()
@@ -301,7 +301,7 @@ def test_file_member_over_existing_directory_raises_extraction_error(
 @pytest.mark.skipif(os.name != "posix", reason="symlinks")
 def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Path) -> None:
     archive = tmp_path / "nested.zip"
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("sub/inner.txt", b"data")
     dest = tmp_path / "dest"
     outside = tmp_path / "outside"
@@ -309,7 +309,7 @@ def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Path) -> Non
     outside.mkdir()
     (dest / "sub").symlink_to(outside, target_is_directory=True)
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         with pytest.raises(ValueError, match="unsafe extraction path"):
             zf.extractall(dest)
     assert list(outside.iterdir()) == []
@@ -317,11 +317,11 @@ def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Path) -> Non
 
 def test_extract_creates_nested_parents(tmp_path: Path) -> None:
     archive = tmp_path / "deep.zip"
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("a/b/c.txt", b"data")
     dest = tmp_path / "dest"
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         zf.extractall(dest)
     assert (dest / "a" / "b" / "c.txt").read_bytes() == b"data"
 
@@ -332,30 +332,30 @@ def test_extract_into_destination_reached_through_symlink(
     tmp_path: Path, use_policy: bool
 ) -> None:
     archive = tmp_path / "a.zip"
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr("dir/file.txt", b"data")
     real = tmp_path / "real"
     real.mkdir()
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         if use_policy:
-            zf.extractall(link, policy=ziplet.ExtractPolicy())
+            zf.extractall(link, policy=zipctl.ExtractPolicy())
         else:
             zf.extractall(link)
     assert (real / "dir" / "file.txt").read_bytes() == b"data"
 
 
-def _open_failure_password_without_encryption(zf: ziplet.ZipFile) -> None:
+def _open_failure_password_without_encryption(zf: zipctl.ZipFile) -> None:
     zf.open("bad.txt", "w", password=b"secret")
 
 
-def _open_failure_missing_password(zf: ziplet.ZipFile) -> None:
-    zf.open("bad.txt", "w", encryption=ziplet.WZ_AES)
+def _open_failure_missing_password(zf: zipctl.ZipFile) -> None:
+    zf.open("bad.txt", "w", encryption=zipctl.WZ_AES)
 
 
-def _open_failure_zip64_required(zf: ziplet.ZipFile) -> None:
+def _open_failure_zip64_required(zf: zipctl.ZipFile) -> None:
     info = ZipInfo("huge.bin")
     info.file_size = 1 << 32
     zf.open(info, "w")
@@ -370,22 +370,22 @@ def _open_failure_zip64_required(zf: ziplet.ZipFile) -> None:
     ],
 )
 def test_failed_open_for_write_does_not_lock_the_archive(
-    failing_open: Callable[[ziplet.ZipFile], None], error: type[Exception]
+    failing_open: Callable[[zipctl.ZipFile], None], error: type[Exception]
 ) -> None:
     buffer = io.BytesIO()
-    with ziplet.ZipFile(buffer, "w", allowZip64=False) as zf:
+    with zipctl.ZipFile(buffer, "w", allowZip64=False) as zf:
         zf.writestr("before.txt", b"before")
         with pytest.raises(error):
             failing_open(zf)
         zf.writestr("after.txt", b"after")
 
-    with ziplet.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
+    with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
         assert zf.namelist() == ["before.txt", "after.txt"]
         assert zf.read("after.txt") == b"after"
 
 
 def _write_duplicates(archive: Path) -> None:
-    with ziplet.ZipFile(archive, "w") as zf:
+    with zipctl.ZipFile(archive, "w") as zf:
         for _ in range(3):
             zf.writestr("same.txt", b"x")
         zf.writestr("other.txt", b"y")
@@ -396,7 +396,7 @@ def test_assess_reports_each_duplicate_target_once(tmp_path: Path) -> None:
     with pytest.warns(UserWarning, match="Duplicate name"):
         _write_duplicates(archive)
 
-    with ziplet.ZipFile(archive) as zf:
+    with zipctl.ZipFile(archive) as zf:
         assessment = zf.assess(tmp_path / "out")
     assert assessment.duplicate_member_names == ("same.txt",)
     assert assessment.duplicate_targets == ((tmp_path / "out" / "same.txt").resolve(),)

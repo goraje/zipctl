@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import pytest
 
-from ziplet.zipfile.write_coordinator import (
+from zipctl.zipfile.write_coordinator import (
     WriteCoordinator,
     WriterArchiveState,
     WriterReservation,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 from collections.abc import Mapping
 
-from ziplet.cli.context import Context
+from zipctl.cli.context import Context
 
 
 def new_context(environ: Mapping[str, str] | None = None, stdin: str = "") -> Context:
