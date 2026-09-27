@@ -364,8 +364,13 @@ class Path:
             raise FileNotFoundError(self)
         stream = self.root.open(self.at, zip_mode, pwd)
         if "b" in mode:
-            text_args = (encoding, errors, newline, line_buffering, write_through)
-            if text_args != (None, None, None, False, False):
+            if (
+                encoding is not None
+                or errors is not None
+                or newline is not None
+                or line_buffering
+                or write_through
+            ):
                 raise ValueError("encoding args invalid for binary operation")
             return stream
         return io.TextIOWrapper(

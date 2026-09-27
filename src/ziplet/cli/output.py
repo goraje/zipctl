@@ -79,8 +79,8 @@ def to_jsonable(value: object) -> JsonValue:
     if isinstance(value, PurePath):
         return str(value)
     if isinstance(value, (set, frozenset)):
-        # only sets of names are written, and str has an order
-        return sorted(cast("AbstractSet[str]", value))
+        members = [to_jsonable(item) for item in cast("AbstractSet[object]", value)]
+        return sorted(members, key=str)  # JSON values have no common order
     if isinstance(value, (list, tuple)):
         return [to_jsonable(item) for item in cast("Sequence[object]", value)]
     if isinstance(value, Mapping):
