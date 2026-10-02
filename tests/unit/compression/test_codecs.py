@@ -7,6 +7,7 @@ from typing import Protocol, cast
 import pytest
 
 from zipctl.compression import bz2, deflate, lzma, zstd
+from zipctl.compression import zstd as zstd_module
 from zipctl.compression.methods import (
     ZIP_BZIP2,
     ZIP_DEFLATED,
@@ -122,3 +123,28 @@ def test_decompress_respects_max_length(codec: CompressionEntry) -> None:
         output += part
     assert d.eof
     assert output == data
+
+
+MAGIC = b"\x28\xb5\x2f\xfd"
+
+
+@pytest.mark.parametrize(
+    ("header", "window"),
+    [
+        (MAGIC + b"\x00\x58", 1 << 21),  # window descriptor: exponent 11
+        (MAGIC + b"\x00\x5d", (1 << 21) + (1 << 21) // 8 * 5),  # with a mantissa
+        (MAGIC + b"\x20\x05", 5),  # single segment: window is the content size
+        (MAGIC + b"\x21\x07\x09", 9),  # ... after a one-byte dictionary id
+        (MAGIC + b"\x60\x01\x00", 256 + 1),  # two-byte content size adds 256
+        (b"\x2a\x4d\x18\x00\x00", 0),  # skippable frame: left to the decoder
+    ],
+)
+def test_zstd_frame_window_is_read_from_the_frame_header(
+    header: bytes, window: int
+) -> None:
+    assert zstd_module._frame_window(header) == window  # noqa: SLF001
+
+
+def test_zstd_frame_window_waits_for_a_complete_header() -> None:
+    assert zstd_module._frame_window(MAGIC) is None  # noqa: SLF001
+    assert zstd_module._frame_window(MAGIC + b"\x00") is None  # noqa: SLF001

@@ -14,6 +14,37 @@ from zipctl.compression.methods import (
 from zipctl.exceptions import BadZipFile
 from zipctl.limits import ArchiveLimits, ArchiveResourceLimitError
 
+_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+_ZSTD_FCS_BYTES = (0, 2, 4, 8)  # indexed by the frame-content-size flag
+
+
+def _frame_window(head: bytes) -> int | None:
+    """The window size a Zstandard frame declares, or ``None`` if not known yet.
+
+    Reads RFC 8878 section 3.1.1.1 directly, so the budget is enforced from
+    the frame header and not from a decoder's error message.
+    """
+    if len(head) < 5:
+        return None
+    if head[:4] != _ZSTD_MAGIC:
+        return 0  # skippable or invalid; the decoder reports it
+    descriptor = head[4]
+    single_segment = bool(descriptor & 0x20)
+    if not single_segment:
+        if len(head) < 6:
+            return None
+        exponent, mantissa = head[5] >> 3, head[5] & 7
+        base = 1 << (10 + exponent)
+        return base + base // 8 * mantissa
+    flag = descriptor >> 6
+    width = _ZSTD_FCS_BYTES[flag] or 1
+    # skip the dictionary id (0, 1, 2 or 4 bytes) to reach the content size
+    start = 5 + (0, 1, 2, 4)[descriptor & 0x03]
+    if len(head) < start + width:
+        return None
+    size = int.from_bytes(head[start : start + width], "little")
+    return size + 256 if flag == 1 else size
+
 
 class _ZstdCompressorLike(Protocol):
     def compress(self, data: bytes) -> bytes: ...
@@ -113,6 +144,7 @@ if zstd is not None:
             """Initializes the decompressor."""
             self._d: _ZstdDecompressorLike = _module.ZstdDecompressor()
             self._window_limit: int | None = None
+            self._head: bytes | None = b""  # frame header bytes until checked
 
         @override
         def configure_limits(self, limits: ArchiveLimits) -> None:
@@ -148,6 +180,7 @@ if zstd is not None:
             Returns:
                 Decompressed bytes.
             """
+            self._check_window(data)
             try:
                 return self._d.decompress(data, max_length)
             except (_module.ZstdError, EOFError) as exc:
@@ -156,6 +189,19 @@ if zstd is not None:
                         "Zstandard window exceeds configured limit"
                     ) from exc
                 raise BadZipFile("Invalid Zstandard data") from exc
+
+        def _check_window(self, data: bytes) -> None:
+            if self._head is None or self._window_limit is None:
+                return
+            self._head += data[: 16 - len(self._head)]
+            window = _frame_window(self._head)
+            if window is None:
+                return
+            self._head = None
+            if window > self._window_limit:
+                raise ArchiveResourceLimitError(
+                    "Zstandard window exceeds configured limit"
+                )
 
     compression_entry = CompressionEntry(
         compression_method=ZIP_ZSTANDARD,
