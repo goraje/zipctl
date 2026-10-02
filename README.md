@@ -247,6 +247,8 @@ errors raise `ExtractionError`, whose `result` attribute contains the partial
 structured result. Size limits are enforced both from archive metadata before
 extraction and against actual bytes written during extraction; an actual-size
 quota breach aborts that member and removes its partial output.
+`WARN` size rules are advisory during both assessment and extraction; `ERROR`
+and `SKIP` rules enforce runtime quotas with their respective actions.
 
 ### Progress reporting
 
@@ -422,9 +424,9 @@ zipctl policy validate FILE [FILE ...] [--json]
   content, and links to directories, broken links and special files (pipes,
   devices) are skipped with a warning; `--symlinks store` keeps every link
   (also directory and broken ones) as a link entry instead, and `--symlinks skip`
-  leaves them all out. Links are never followed into directories, and a stored
-  link is not encrypted, whatever the password options say: its target is a
-  path, not content. Extraction refuses stored links unless the policy allows
+   leaves them all out. Links are never followed into directories during recursive
+   discovery. Stored link targets are encrypted according to the same protection
+   rules as files. Extraction refuses stored links unless the policy allows
   them (`"allow_symlinks": true`), and even then one that points out of the
   destination. `--exclude GLOB` (repeatable) leaves out what matches: a pattern
   without a `/` matches the last name at any depth (`'*.pyc'`, `.git`), one with
@@ -470,8 +472,8 @@ zipctl policy validate FILE [FILE ...] [--json]
 - `extract` applies the default extraction policy unless told otherwise, so
   traversal, absolute paths, symlinks, special files and compression bombs are
   refused per member (each is listed as `FAILED`/`SKIPPED` with the reason; the
-  rest is still extracted, and the exit code is `1`). It takes `MEMBER` names
-  (exact, not patterns; an unknown one fails before anything is written),
+   rest is still extracted, and the exit code is `1`). It takes `MEMBER` names
+   or patterns (an unmatched selection fails before anything is written),
   `--match GLOB` (repeatable) to add members by pattern (a pattern that matches
   nothing is an error),
   `-d DIR` (default: the current directory), the `--policy` / `--policy-json`
@@ -497,11 +499,14 @@ zipctl policy validate FILE [FILE ...] [--json]
   never work in place (`OUT` may not be `IN`, even with `--force`, or a link to
   it), and an existing `OUT` is refused unless you pass `--force`. Members are
   streamed one at a time, so size is no problem. Each keeps its name, date,
-  mode, comment and compression method, and so does the archive comment; extra
-  fields are not copied. Data is decompressed and recompressed, since there is
-  no raw copy. `OUT` is written beside its final name, **read back and compared**
-  with what was copied (names, dates, modes, comments, protection, and every
-  member's data) and only then moved into place, so a failed check, a wrong
+   mode, comment and compression method, and so does the archive comment.
+   Extra fields such as timestamps and ownership are preserved; ZIP64, AES and
+   Unicode-path fields are rebuilt or omitted as appropriate. When compression
+   is unchanged, compressed bytes can be copied directly, with decryption and
+   re-encryption as needed. Changing compression decompresses and recompresses
+   the payload. `OUT` is written beside its final name, **read back and compared**
+   with what was copied (names, dates, modes, comments, protection, and each
+   member's size and CRC-32) and only then moved into place, so a failed check, a wrong
   password, a full disk or Ctrl-C leaves `OUT` untouched and no scratch file
   behind. `--no-verify` skips the read-back. Output is `-q`/`-v`/`--json` like
   `create`.
@@ -555,12 +560,19 @@ one; every accepted password is remembered, so an archive whose members share a
 password asks once, and one with several passwords asks once per password. Three
 wrong tries fail that member; an empty answer (or Ctrl-D) stops asking. Typed
 passwords are masked with `*` on Python 3.14+; older Pythons prompt silently.
+Password selection for reading commands verifies candidate passwords against
+the member's integrity data before remembering them. A lightweight verifier
+collision therefore does not prevent trying the remaining passwords. This
+adds an integrity pass for encrypted members; `check-password` retains its
+explicit lightweight/default and `--full` modes.
 
 ## Public API
 
 The package exports these primary entry points:
 
 - `ZipFile`
+- `ZipInfo`, `BadZipFile`, `LargeZipFile`
+- `ArchiveLimits`, `ArchiveResourceLimitError`
 - `is_zipfile`
 - `INHERIT_ENCRYPTION`
 - `ExtractPolicy`, `ExtractResult`, `ExtractMemberResult`, `ExtractionError`
@@ -618,10 +630,93 @@ Each file is fsynced before it is moved into place; pass
 `ExtractPolicy(fsync_files=False)` to skip that when extraction throughput matters
 more than durability across power loss.
 Symlinks and special files are rejected by default. Allowed symlinks are
+checked for indirect escapes through existing symlinks as well as absolute
+and parent-traversal targets. Their target text is limited to 64 KiB. They are
 materialized without following their targets, and supported FIFOs can be
 materialized on platforms that provide `os.mkfifo`. Descriptor-backed
 no-follow checks are used where the platform exposes the required APIs; other
 platforms use the strongest path-based checks available.
+The destination must not be concurrently rearranged by an untrusted process:
+symlink targets can change after validation, and path-based platforms cannot
+provide descriptor-relative containment. No-overwrite commits use exclusive
+hard links and fail rather than silently replacing a concurrent file; a
+filesystem without hard-link support reports an extraction error. Replacement
+uses atomic rename. The same no-clobber rule applies to CLI archive creation.
+
+Unicode Path metadata determines the effective extraction name; policy checks
+and materialization use that same name. Original ZIP names remain available
+for local-header validation and are preserved when appending to an archive.
+
+Extraction preserves archive order. Parents created during the current extraction
+are accepted when their explicit directory entry appears later; pre-existing
+targets remain subject to the overwrite policy. Rename mode inserts a counter
+before the suffix chain (`file.1.tar.gz`) and checks the candidate against extension
+and custom validation rules. Explicit CLI `--overwrite` overrides a loaded
+`allow_overwrite` setting.
+
+Direct `ExtractPolicy(...)` construction validates limits, actions and extensions
+just like JSON loading. Extension rules are normalized to lowercase.
+
+### Public API contracts
+
+See [Public API contracts](docs/public-api.md) for compatibility, exceptions,
+integrity verification and lifecycle guarantees.
+
+### Archive resource budgets
+
+`ExtractPolicy` limits output. `ArchiveLimits` additionally limits work performed
+while opening an archive and initializing built-in decoders:
+
+```python
+from zipctl import ArchiveLimits, ZipFile
+
+limits = ArchiveLimits(
+    max_entries=100_000,
+    max_directory_bytes=64 << 20,
+    max_metadata_bytes=32 << 20,
+    max_lzma_dictionary_bytes=64 << 20,
+    max_zstd_window_bytes=64 << 20,
+)
+with ZipFile("input.zip", limits=limits) as archive:
+    print(archive.namelist())
+```
+
+Counts and directory sizes are checked before record parsing; actual member count
+and cumulative encoded names, extra fields and comments are checked incrementally
+before reading variable-length fields. Metadata includes the archive comment.
+LZMA dictionaries and Zstandard windows are bounded separately. Zstandard window
+budgets must be powers of two between 1 KiB and 2 GiB.
+
+Exceeding a budget raises `ArchiveResourceLimitError`. Parser budgets abort opening;
+decoder budgets abort payload processing. These errors are not downgraded by
+extraction policy actions. CLI `test` records a decoder failure for the member and
+continues testing the remaining members.
+
+Library defaults keep parser budgets unlimited and the existing 1 GiB LZMA cap.
+CLI commands use the finite defaults shown above. Override them with
+`--archive-max-entries`, `--archive-max-directory-bytes`,
+`--archive-max-metadata-bytes`, `--archive-max-lzma-dictionary-bytes`, or
+`--archive-max-zstd-window-bytes`. Values are counts/bytes; `none` disables a budget.
+These bound specific resources, not total process memory or CPU time. Custom
+compression-registry implementations must enforce their own decoder budgets.
+
+### Lifecycle and coordination
+
+Completed members can be read before closing a writable archive. Shared archive
+stream access, reader registration and close are coordinated within a process;
+only one member writer may be active. This is not cross-process file locking.
+Use external coordination when multiple processes modify the same archive.
+
+Failed writes on seekable output can be followed by successful writes; finalization
+truncates abandoned trailing bytes. Non-seekable output cannot roll back a partial
+write: subsequent writes and archive finalization raise, and the caller must discard
+that output. Archive-level finalization errors are propagated.
+
+`ZipExtFile.verify_integrity()` restarts verification from the beginning, even after
+a read or seek, and consumes the member. AES checks authenticate the ciphertext;
+reading the decompressed payload is still required to validate its codec and size.
+Repeated verification is supported. Merely closing a partially read member does
+not verify its integrity.
 
 ### Compression Registries
 
@@ -663,6 +758,9 @@ compatibility with code using the CPython-style metadata attribute.
 - decompression is streamed and bounded per read, but callers should still
   enforce application-level limits on total extracted bytes and archive member
   counts when processing untrusted archives
+- central-directory records are read and written incrementally; the archive
+  still retains one `ZipInfo` per entry in memory, before extraction policies
+  are assessed
 
 ## Interoperability
 

@@ -11,6 +11,7 @@ from zipctl.compression.methods import (
     DecompressorBase,
 )
 from zipctl.exceptions import BadZipFile
+from zipctl.limits import ArchiveLimits
 
 _MAX_LZMA_DICT_SIZE = 1 << 30
 
@@ -37,7 +38,9 @@ try:
         props_byte = (_LZMA1_PB * 5 + _LZMA1_LP) * 9 + _LZMA1_LC
         return bytes([props_byte]) + struct.pack("<I", _LZMA1_DICT_SIZE)
 
-    def _lzma1_filter_from_props(props: bytes) -> dict[str, int]:
+    def _lzma1_filter_from_props(
+        props: bytes, limits: ArchiveLimits | None = None
+    ) -> dict[str, int]:
         """Decodes an LZMA1 properties byte sequence into an lzma filter dict.
 
         Reverses the encoding performed by ``_lzma1_props_bytes``: extracts
@@ -63,7 +66,9 @@ try:
         if lc > 8 or lp > 4 or pb > 4 or lc + lp > 4:
             raise BadZipFile("Invalid LZMA properties")
         (dict_size,) = struct.unpack("<I", props[1:5])
-        if dict_size > _MAX_LZMA_DICT_SIZE:
+        if limits is not None:
+            limits.check("max_lzma_dictionary_bytes", max(4096, dict_size))
+        elif dict_size > _MAX_LZMA_DICT_SIZE:
             raise BadZipFile(
                 f"LZMA dictionary size {dict_size} exceeds the supported limit "
                 f"of {_MAX_LZMA_DICT_SIZE} bytes"
@@ -163,9 +168,14 @@ try:
 
         def __init__(self) -> None:
             """Initializes the decompressor in a deferred state."""
+            self._limits: ArchiveLimits | None = None
             self._decomp: lzma.LZMADecompressor | None = None
             self._unconsumed: bytes = b""
             self._eof: bool = False
+
+        @override
+        def configure_limits(self, limits: ArchiveLimits) -> None:
+            self._limits = limits
 
         @property
         @override
@@ -202,8 +212,6 @@ try:
                 self._unconsumed += data
                 if len(self._unconsumed) < 4:
                     return b""
-                if self._unconsumed[:2] != b"\x09\x04":
-                    raise BadZipFile("Invalid ZIP LZMA header")
                 (psize,) = struct.unpack("<H", self._unconsumed[2:4])
                 if psize != 5:
                     raise BadZipFile("Invalid ZIP LZMA properties size")
@@ -211,13 +219,20 @@ try:
                     return b""
                 self._decomp = lzma.LZMADecompressor(
                     lzma.FORMAT_RAW,
-                    filters=[_lzma1_filter_from_props(self._unconsumed[4 : 4 + psize])],
+                    filters=[
+                        _lzma1_filter_from_props(
+                            self._unconsumed[4 : 4 + psize], self._limits
+                        )
+                    ],
                 )
                 data = self._unconsumed[4 + psize :]
                 del self._unconsumed
 
             assert self._decomp is not None
-            result = self._decomp.decompress(data, max_length)
+            try:
+                result = self._decomp.decompress(data, max_length)
+            except (lzma.LZMAError, EOFError) as exc:
+                raise BadZipFile("Invalid LZMA data") from exc
             self._eof = self._decomp.eof
             return result
 

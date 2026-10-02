@@ -15,6 +15,7 @@ import shutil
 import stat
 import tempfile
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Protocol
@@ -24,6 +25,7 @@ from zipctl.zipfile.exceptions import (
     ExtractionQuotaExceeded,
     ExtractionSecurityError,
 )
+from zipctl.zipfile.extract import OverwritePolicy
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.progress import ProgressReporter
 from zipctl.zipfile.secure_fs import open_secure_parent
@@ -61,6 +63,8 @@ class ExtractionQuota:
     member_limit: int | None = None
     total_limit: int | None = None
     total_written: int = 0
+    created_directories: set[Path] | None = None
+    validate_target: Callable[[Path], None] | None = None
 
     @property
     def unbounded(self) -> bool:
@@ -83,6 +87,8 @@ class MaterializeParams:
     dir_fd: int | None
     fsync: bool = True
     reporter: ProgressReporter | None = None
+    root: str = "."
+    overwrite: OverwritePolicy = OverwritePolicy.REPLACE
 
 
 class Materializer(Protocol):
@@ -137,22 +143,6 @@ def _lstat_leaf(name: str, dir_fd: int | None) -> os.stat_result | None:
         return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
-
-
-def _unlink_leaf(name: str, dir_fd: int | None) -> bool:
-    """Remove a non-directory leaf; return whether one existed."""
-    leaf = _lstat_leaf(name, dir_fd)
-    if leaf is None:
-        return False
-    if stat.S_ISDIR(leaf.st_mode):
-        raise ExtractionMaterializationError(
-            "Refusing to replace an existing directory with a non-directory member"
-        )
-    try:
-        os.unlink(name, dir_fd=dir_fd)
-    except FileNotFoundError:
-        return False
-    return True
 
 
 def _leaf_reference(
@@ -212,33 +202,48 @@ def materialize_directory(params: MaterializeParams) -> MaterializationResult:
             recheck = _lstat_leaf(name, dir_fd)
             if recheck is None or not stat.S_ISDIR(recheck.st_mode):
                 raise
+        else:
+            if params.quota.created_directories is not None:
+                params.quota.created_directories.add(Path(params.targetpath))
     return MaterializationResult(Path(params.targetpath), 0, existed)
 
 
 def materialize_symlink(params: MaterializeParams) -> MaterializationResult:
     with params.open_member() as source:
-        link_target = os.fsdecode(source.read())
+        payload = source.read(65537)
+    if len(payload) > 65536:
+        raise ExtractionSecurityError("Symlink target is too long")
+    link_target = os.fsdecode(payload)
     if os.path.isabs(link_target) or has_parent_component(link_target):
         raise ExtractionSecurityError(
             "Refusing to create symlink outside extraction root"
         )
-    name, dir_fd = _leaf_reference(params, os.symlink, os.unlink)
-    existed = _unlink_leaf(name, dir_fd)
-    os.symlink(link_target, name, dir_fd=dir_fd)
-    return MaterializationResult(Path(params.targetpath), 0, existed)
+    resolved = (Path(params.directory) / link_target).resolve()
+    if not resolved.is_relative_to(Path(params.root).resolve()):
+        raise ExtractionSecurityError(
+            "Refusing to create symlink outside extraction root"
+        )
+    name, dir_fd = _leaf_reference(params, os.symlink, os.link, os.rename, os.unlink)
+    temp = _temporary_name(params, dir_fd)
+    os.symlink(link_target, temp, dir_fd=dir_fd)
+    try:
+        return _commit_temp(params, temp, name, dir_fd, 0)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temp, dir_fd=dir_fd)
 
 
 def materialize_special(params: MaterializeParams) -> MaterializationResult:
-    # ponytail: no dir_fd path for FIFO creation (os.mkfifo lacks a
-    # dir_fd parameter; os.mknod's dir_fd support is Linux-only and
-    # unconfirmed on this platform). Residual TOCTOU window between the
-    # guarded parent walk and this path-based mkfifo call. Upgrade:
-    # hasattr(os, "mknod") and os.mknod in os.supports_dir_fd, if needed.
     member = params.member
     if stat.S_ISFIFO(entry_mode(member)) and hasattr(os, "mkfifo"):
-        existed = _unlink_leaf(params.targetpath, None)
-        os.mkfifo(params.targetpath, stat.S_IMODE(member.external_attr >> 16))
-        return MaterializationResult(Path(params.targetpath), 0, existed)
+        name, dir_fd = _leaf_reference(params, os.mkfifo, os.link, os.rename, os.unlink)
+        temp = _temporary_name(params, dir_fd)
+        os.mkfifo(temp, stat.S_IMODE(member.external_attr >> 16), dir_fd=dir_fd)
+        try:
+            return _commit_temp(params, temp, name, dir_fd, 0)
+        finally:
+            with suppress(FileNotFoundError):
+                os.unlink(temp, dir_fd=dir_fd)
     raise ExtractionMaterializationError("Unsupported special file type")
 
 
@@ -247,29 +252,30 @@ def materialize_regular_file(params: MaterializeParams) -> MaterializationResult
 
     Existing files are therefore preserved when the member fails part-way.
     """
-    name, dir_fd = _leaf_reference(params, os.open, os.rename)
+    name, dir_fd = _leaf_reference(params, os.open, os.rename, os.link, os.unlink)
     leaf = _lstat_leaf(name, dir_fd)
-    if leaf is not None and stat.S_ISDIR(leaf.st_mode):
+    if (
+        leaf is not None
+        and stat.S_ISDIR(leaf.st_mode)
+        and params.overwrite == OverwritePolicy.REPLACE
+    ):
         raise ExtractionMaterializationError(
             "Refusing to replace an existing directory with a file"
         )
-    existed = leaf is not None
     if dir_fd is not None:
-        bytes_written = _write_via_descriptor(params, name, dir_fd)
-    else:
-        bytes_written = _write_via_path(params)
-    return MaterializationResult(Path(params.targetpath), bytes_written, existed)
+        return _write_via_descriptor(params, name, dir_fd)
+    return _write_via_path(params)
 
 
-def _write_via_descriptor(params: MaterializeParams, name: str, dir_fd: int) -> int:
+def _write_via_descriptor(
+    params: MaterializeParams, name: str, dir_fd: int
+) -> MaterializationResult:
     temp_name: str | None = None
     try:
         temp_name, fd = _open_unique_temp_fd(dir_fd)
         with os.fdopen(fd, "wb") as target:
             bytes_written = _copy_payload(params, target)
-        os.rename(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-        temp_name = None
-        return bytes_written
+        return _commit_temp(params, temp_name, name, dir_fd, bytes_written)
     finally:
         if temp_name is not None:
             try:
@@ -278,7 +284,7 @@ def _write_via_descriptor(params: MaterializeParams, name: str, dir_fd: int) -> 
                 pass
 
 
-def _write_via_path(params: MaterializeParams) -> int:
+def _write_via_path(params: MaterializeParams) -> MaterializationResult:
     temp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -286,9 +292,7 @@ def _write_via_path(params: MaterializeParams) -> int:
         ) as target:
             temp_name = target.name
             bytes_written = _copy_payload(params, target)
-        os.replace(temp_name, params.targetpath)
-        temp_name = None
-        return bytes_written
+        return _commit_temp(params, temp_name, params.targetpath, None, bytes_written)
     finally:
         if temp_name is not None:
             try:
@@ -309,6 +313,50 @@ def select_materializer(member: ZipInfo) -> Materializer:
     return materialize_regular_file
 
 
+def _temporary_name(params: MaterializeParams, dir_fd: int | None) -> str:
+    name = f"{_TEMP_PREFIX}{secrets.token_hex(16)}"
+    return name if dir_fd is not None else os.path.join(params.directory, name)
+
+
+def _commit_temp(
+    params: MaterializeParams, temp: str, name: str, dir_fd: int | None, size: int
+) -> MaterializationResult:
+    """Publish a complete entry; exclusive policies never replace a racing file."""
+    if params.overwrite == OverwritePolicy.REPLACE:
+        leaf = _lstat_leaf(name, dir_fd)
+        if leaf is not None and stat.S_ISDIR(leaf.st_mode):
+            raise ExtractionMaterializationError(
+                "Refusing to replace an existing directory"
+            )
+        existed = leaf is not None
+        os.replace(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        return MaterializationResult(Path(params.targetpath), size, existed)
+    candidate = name
+    counter = 0
+    while True:
+        target = Path(params.targetpath).with_name(os.path.basename(candidate))
+        if candidate != name and params.quota.validate_target is not None:
+            params.quota.validate_target(target)
+        try:
+            os.link(
+                temp,
+                candidate,
+                src_dir_fd=dir_fd,
+                dst_dir_fd=dir_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            if params.overwrite != OverwritePolicy.RENAME:
+                raise
+            counter += 1
+            suffix = "".join(Path(name).suffixes)
+            stem = name[: -len(suffix)] if suffix else name
+            candidate = f"{stem}.{counter}{suffix}"
+        else:
+            target = Path(params.targetpath).with_name(os.path.basename(candidate))
+            return MaterializationResult(target, size)
+
+
 def materialize_member(
     member: ZipInfo,
     targetpath: str,
@@ -318,6 +366,7 @@ def materialize_member(
     *,
     fsync: bool = True,
     reporter: ProgressReporter | None = None,
+    overwrite: OverwritePolicy = OverwritePolicy.REPLACE,
 ) -> MaterializationResult:
     """Create the filesystem object for *member* at *targetpath* below *root*.
 
@@ -326,7 +375,11 @@ def materialize_member(
     unless *fsync* is ``False``.
     """
     parent = os.path.dirname(targetpath)
-    dir_fd = open_secure_parent(parent, root) if parent else None
+    dir_fd = (
+        open_secure_parent(parent, root, quota.created_directories if quota else None)
+        if parent
+        else None
+    )
     try:
         params = MaterializeParams(
             member,
@@ -337,6 +390,8 @@ def materialize_member(
             dir_fd,
             fsync,
             reporter,
+            root,
+            overwrite,
         )
         return select_materializer(member)(params)
     finally:

@@ -323,7 +323,10 @@ def test_hostile_names_are_escaped_in_reports_but_exact_in_json(
     dest = workdir / "out"
     result = cli("extract", "-v", str(archive), "-d", str(dest))
     assert result.returncode == 0, result
-    assert (dest / name).read_bytes() == b"x"
+    disk_name = (
+        name.replace("\n", "_").replace("\x1b", "_") if os.name == "nt" else name
+    )
+    assert (dest / disk_name).read_bytes() == b"x"
     assert "\x1b" not in result.stdout
     assert "Extracting: line1\\x0aline2\\x1b[31m.txt" in result.stdout
     document = _json(cli("extract", "--json", str(archive), "-d", str(workdir / "o2")))
@@ -647,7 +650,7 @@ def test_overwrite_rename_keeps_both(
     dest = _existing(workdir)
     result = cli("extract", str(two_files), "-d", str(dest), "--overwrite", "rename")
     assert result.returncode == 0, result
-    assert tree(dest) == {"a.txt": b"OLD a", "a.txt.1": b"NEW a", "b.txt": b"NEW b"}
+    assert tree(dest) == {"a.txt": b"OLD a", "a.1.txt": b"NEW a", "b.txt": b"NEW b"}
 
 
 def test_extracting_twice_needs_an_overwrite_choice(

@@ -8,7 +8,6 @@ from typing_extensions import override
 
 from zipctl.compression import (
     ZIP_DEFLATED,
-    ZIP_LZMA,
     ZIP_STORED,
     Registry,
     compressor_names,
@@ -21,8 +20,9 @@ from zipctl.compression.methods import (
 from zipctl.cryptography.aes import AesKeyCache, AesZipDecrypter
 from zipctl.cryptography.zipcrypto import ZipCryptoDecrypter
 from zipctl.exceptions import BadZipFile, PasswordRequired
+from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.info import ZipInfo
-from zipctl.zipfile.io_wrappers import ClosableZipStream
+from zipctl.zipfile.io_wrappers import ClosableZipStream, read_exactly
 from zipctl.zipfile.shared import ReadWriteMode, crc32
 
 __all__ = [
@@ -75,6 +75,7 @@ class ZipExtFile(io.BufferedIOBase):
         pwd: bytes | None = None,
         compression_registry: Registry = registry,
         key_cache: AesKeyCache | None = None,
+        limits: ArchiveLimits | None = None,
     ) -> None:
         """Initialise a :class:`ZipExtFile` for reading a single ZIP entry.
 
@@ -112,6 +113,7 @@ class ZipExtFile(io.BufferedIOBase):
         self._pwd: bytes | None = pwd
         self._compression_registry: Registry = compression_registry
         self._key_cache: AesKeyCache | None = key_cache
+        self._limits: ArchiveLimits = limits or ArchiveLimits()
 
         self._compress_type: int = zipinfo.compress_type
         self._orig_compress_left: int = zipinfo.compress_size
@@ -170,9 +172,7 @@ class ZipExtFile(io.BufferedIOBase):
                     "requires a password."
                 )
             encryption_header_length = decrypter_cls.header_length(self._zinfo)
-            self.encryption_header = self._fileobj.read(encryption_header_length)
-            if len(self.encryption_header) != encryption_header_length:
-                raise BadZipFile("Truncated AES encryption header")
+            self.encryption_header = self._read_header(encryption_header_length, "AES")
             self._orig_compress_left -= encryption_header_length
             self._orig_compress_left -= decrypter_cls.authentication_trailer_length
             if self._orig_compress_left < 0:
@@ -183,20 +183,21 @@ class ZipExtFile(io.BufferedIOBase):
                 raise PasswordRequired(
                     f"File {self.name!r} is encrypted, password required for extraction"
                 )
-            self.encryption_header = self._fileobj.read(
-                ZipCryptoDecrypter.encryption_header_length
+            self.encryption_header = self._read_header(
+                ZipCryptoDecrypter.encryption_header_length, "ZipCrypto"
             )
-            if (
-                len(self.encryption_header)
-                != ZipCryptoDecrypter.encryption_header_length
-            ):
-                raise BadZipFile("Truncated ZipCrypto encryption header")
             self._orig_compress_left -= decrypter_cls.header_length(self._zinfo)
             if self._orig_compress_left < 0:
                 raise BadZipFile(
                     "ZipCrypto entry is shorter than its encryption header"
                 )
             return decrypter_cls
+
+    def _read_header(self, size: int, method: str) -> bytes:
+        try:
+            return read_exactly(self._fileobj, size)
+        except EOFError as exc:
+            raise BadZipFile(f"Truncated {method} encryption header") from exc
 
     def _decrypter_class_for_entry(
         self,
@@ -234,6 +235,9 @@ class ZipExtFile(io.BufferedIOBase):
         counters, read buffer, EOF flag, and creates fresh decrypter and
         decompressor instances.
         """
+        self._expected_crc = (
+            self._zinfo.CRC if self._orig_start_crc is not None else None
+        )
         self._running_crc: int | None = self._orig_start_crc
         self._compress_left: int = self._orig_compress_left
         self._left: int = self._zinfo.file_size
@@ -246,6 +250,7 @@ class ZipExtFile(io.BufferedIOBase):
         self._decompressor: DecompressorBase = (
             self._compression_registry.get_decompressor(self._compress_type)
         )
+        self._decompressor.configure_limits(self._limits)
 
     def verify_integrity(self) -> None:
         """Check the whole entry against its integrity data.
@@ -258,9 +263,15 @@ class ZipExtFile(io.BufferedIOBase):
             BadZipFile: If the HMAC or CRC-32 does not match, or the entry is
                 truncated.
         """
+        if self.closed:
+            raise ValueError("verify on closed file")
+        self._fileobj.seek(self._compress_start)
+        self._init_read_state()
         if isinstance(self._decrypter, AesZipDecrypter):
             for _ in self._raw_chunks():
                 pass
+            self._eof = True
+            self._left = 0
         else:
             try:
                 while self.read(self.MAX_READ_SIZE):
@@ -284,7 +295,7 @@ class ZipExtFile(io.BufferedIOBase):
                 yield self._read2(self.MAX_READ_SIZE)
             if isinstance(self._decrypter, AesZipDecrypter):
                 self._decrypter.check_hmac(
-                    self._fileobj.read(self._decrypter.hmac_size)
+                    self._read_header(self._decrypter.hmac_size, "HMAC")
                 )
         except EOFError:
             raise BadZipFile(f"Truncated data for file {self.name!r}") from None
@@ -298,29 +309,16 @@ class ZipExtFile(io.BufferedIOBase):
         validates the HMAC tag for WZ-AES V2 or the CRC-32 otherwise.
         Unencrypted entries check the CRC-32 directly.
 
-        For LZMA entries inside a WZ-AES stream any trailing end-of-stream
-        marker or padding bytes are consumed so that the HMAC covers the
-        complete compressed data.
+        AES authentication always covers the complete declared ciphertext,
+        including any padding following the compressed stream.
 
         Raises:
             BadZipFile: If the HMAC tag does not match, or if the CRC-32 of
                 the decompressed data does not equal the expected value.
         """
-        if (
-            self._zinfo.aes_extra.wz_aes_version is not None
-            and self._zinfo.compress_type == ZIP_LZMA
-        ):
-            # LZMA may have an end-of-stream marker or padding.  Read it
-            # all so the HMAC covers the full compressed byte stream.
+        if isinstance(self._decrypter, AesZipDecrypter):
             while self._compress_left > 0:
-                data = self._read2(self.MIN_READ_SIZE)
-                assert self._decompressor is not None
-                data = self._decompressor.decompress(data)
-                if data:
-                    raise BadZipFile(
-                        f"More data found than indicated by uncompressed size "
-                        f"for '{self.name}'"
-                    )
+                self._read2(self.MAX_READ_SIZE)
         if self._decrypter is not None:
             self._decrypter.finalize(
                 self._expected_crc,
@@ -369,6 +367,8 @@ class ZipExtFile(io.BufferedIOBase):
             bytes: Bytes up to and including the next ``b'\\n'``, or until
             EOF if no newline is found.  Returns ``b''`` at EOF.
         """
+        if self.closed:
+            raise ValueError("read from closed file.")
         if limit is None:
             limit = -1
         if limit < 0:
@@ -379,7 +379,25 @@ class ZipExtFile(io.BufferedIOBase):
                 self._offset = i
                 return line
 
-        return io.BufferedIOBase.readline(self, limit)
+        # peek() may return more than its hint. BufferedIOBase.readline() can
+        # overrun a finite limit with such a peek implementation, so cap every
+        # consumed chunk ourselves.
+        chunks: list[bytes] = []
+        remaining = limit
+        while remaining != 0:
+            available = self.peek(1)
+            if remaining > 0:
+                available = available[:remaining]
+            if not available:
+                break
+            newline = available.find(b"\n")
+            count = newline + 1 if newline >= 0 else len(available)
+            chunks.append(self.read(count))
+            if remaining > 0:
+                remaining -= count
+            if newline >= 0:
+                break
+        return b"".join(chunks)
 
     def peek(self, n: int = 1) -> bytes:
         """Return buffered bytes without advancing the position.
@@ -395,6 +413,8 @@ class ZipExtFile(io.BufferedIOBase):
             bytes: Up to 512 bytes from the current position.  May return
             fewer bytes than *n* if near EOF.
         """
+        if self.closed:
+            raise ValueError("read from closed file.")
         if n > len(self._readbuffer) - self._offset:
             chunk = self.read(n)
             if len(chunk) > self._offset:
@@ -437,12 +457,12 @@ class ZipExtFile(io.BufferedIOBase):
         if self.closed:
             raise ValueError("read from closed file.")
         if n is None or n < 0:
-            buf = self._readbuffer[self._offset :]
+            chunks = [self._readbuffer[self._offset :]]
             self._readbuffer = b""
             self._offset = 0
             while not self._eof:
-                buf += self._read1(self.MAX_N)
-            return buf
+                chunks.append(self._read1(self.MAX_READ_SIZE))
+            return b"".join(chunks)
 
         end = n + self._offset
         if end < len(self._readbuffer):
@@ -493,6 +513,8 @@ class ZipExtFile(io.BufferedIOBase):
         Returns:
             bytes: Decompressed bytes, possibly fewer than *n*.
         """
+        if self.closed:
+            raise ValueError("read from closed file.")
         if n is None or n < 0:
             buf = self._readbuffer[self._offset :]
             self._readbuffer = b""
@@ -551,9 +573,7 @@ class ZipExtFile(io.BufferedIOBase):
                 f"More data found than indicated by uncompressed size for '{self.name}'"
             )
         self._left -= len(data)
-        if self._compress_type == ZIP_STORED and self._left <= 0:
-            self._eof = True
-        elif (
+        if (
             self._compress_type != ZIP_STORED
             and self._compress_left <= 0
             and not self._eof
@@ -562,6 +582,8 @@ class ZipExtFile(io.BufferedIOBase):
             raise BadZipFile(f"Truncated compressed stream for '{self.name}'")
         self._update_crc(data)
         if self._eof:
+            if self._left:
+                raise BadZipFile(f"Uncompressed size mismatch for {self.name!r}")
             self._check_integrity()
         return data
 
@@ -591,11 +613,7 @@ class ZipExtFile(io.BufferedIOBase):
         if self._compress_type == ZIP_DEFLATED:
             assert isinstance(self._decompressor, StreamingDecompressor)
             data = self._decompressor.decompress(data, n)
-            self._eof = self._decompressor.eof or (
-                self._compress_left <= 0 and not self._decompressor.unconsumed_tail
-            )
-            if self._eof:
-                data += self._decompressor.flush()
+            self._eof = self._decompressor.eof
             return data
         data = self._decompressor.decompress(data, n)
         # A bounded decompressor may still have output buffered after the
@@ -632,7 +650,7 @@ class ZipExtFile(io.BufferedIOBase):
         data = self._fileobj.read(n)
         self._compress_left -= len(data)
         if not data:
-            raise EOFError
+            raise BadZipFile(f"Truncated data for file {self.name!r}")
 
         if self._decrypter is not None:
             data = self._decrypter.decrypt(data)

@@ -33,9 +33,10 @@ if TYPE_CHECKING:
 
 from zipctl.compression import ZIP_LZMA, ZIP_STORED, Registry, registry
 from zipctl.cryptography import WZ_AES, ZIP_CRYPTO
-from zipctl.cryptography.aes import AesKeyCache, AesZipEncryptor
+from zipctl.cryptography.aes import EXTRA_WZ_AES, AesKeyCache, AesZipEncryptor
 from zipctl.cryptography.zipcrypto import ZipCryptoEncryptor
 from zipctl.exceptions import BadZipFile, LargeZipFile, PasswordRequired
+from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.assessment import (
     ArchiveAssessment,
 )
@@ -50,9 +51,10 @@ from zipctl.zipfile.extract import (
     ExtractPolicy,
     ExtractResult,
     MemberStatus,
+    OverwritePolicy,
     normalized_destination,
 )
-from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.info import WzAesExtra, ZipInfo, _Extra
 from zipctl.zipfile.inspection import (
     InspectionMember,
     InspectionResult,
@@ -176,8 +178,10 @@ def is_zipfile(filename: StrPath | IO[bytes]) -> bool:
     try:
         if not isinstance(filename, (str, os.PathLike)):
             pos = filename.tell()
-            result = looks_like_zip(filename)
-            filename.seek(pos)
+            try:
+                result = looks_like_zip(filename)
+            finally:
+                filename.seek(pos)
         else:
             with open(filename, "rb") as fp:
                 result = looks_like_zip(fp)
@@ -205,6 +209,8 @@ class ZipFileExtra:
     def __post_init__(self) -> None:
         if self.force_wz_aes_version not in (None, 1, 2):
             raise ValueError("force_wz_aes_version must be 1 or 2")
+        if self.wz_aes_nbits not in (128, 192, 256):
+            raise ValueError("wz_aes_nbits must be 128, 192 or 256")
 
 
 class ZipFile:
@@ -245,6 +251,7 @@ class ZipFile:
         encryption: str | None = None,
         extra: ZipFileExtra | None = None,
         compression_registry: Registry | None = None,
+        limits: ArchiveLimits | None = None,
     ) -> None:
         """Open a ZIP archive for reading, writing, exclusive creation, or appending.
 
@@ -268,6 +275,7 @@ class ZipFile:
                 or ``ZIP_CRYPTO``). Requires :meth:`setpassword` before
                 writing.
             extra: Additional settings; see :class:`ZipFileExtra`.
+            limits: Parser and built-in decoder budgets; see :class:`ArchiveLimits`.
 
         Raises:
             ValueError: If *mode* is invalid, *metadata_encoding* is supplied
@@ -321,6 +329,8 @@ class ZipFile:
         self._seekable: bool = True
         self.start_dir: int = 0
         self._compression_registry: Registry = selected_registry
+        self.limits: ArchiveLimits = limits or ArchiveLimits()
+        self._write_failed: bool = False
 
         try:
             if mode == "r":
@@ -410,7 +420,9 @@ class ZipFile:
                 directory is truncated or corrupt.
         """
         assert self.fp is not None
-        directory = read_directory(self.fp, self.metadata_encoding, self.debug)
+        directory = read_directory(
+            self.fp, self.metadata_encoding, self.debug, self.limits
+        )
         self._comment = directory.comment
         self.start_dir = directory.start_dir
         self.filelist.extend(directory.infos)
@@ -751,15 +763,18 @@ class ZipFile:
             BadPassword: If the password does not match the entry.
             TypeError: If *pwd* is not ``bytes``.
         """
-        assert self.fp is not None
-        self._file_ref_cnt += 1
-        zef_file = ClosableZipStream(
-            self.fp,
-            zinfo.header_offset,
-            self._fpclose,
-            self._lock,
-            lambda: self._write_coordinator.active,
-        )
+        with self._lock:
+            if self.fp is None:
+                raise ValueError("Attempt to read ZIP archive that was already closed")
+            self._write_coordinator.ensure_readable()
+            self._file_ref_cnt += 1
+            zef_file = ClosableZipStream(
+                self.fp,
+                zinfo.header_offset,
+                self._fpclose,
+                self._lock,
+                lambda: self._write_coordinator.active,
+            )
         try:
             read_local_header(zef_file, zinfo, self.metadata_encoding)
 
@@ -801,6 +816,7 @@ class ZipFile:
                 pwd,
                 self._compression_registry,
                 self._aes_keys,
+                self.limits,
             )
         except BaseException:
             zef_file.close()
@@ -847,6 +863,12 @@ class ZipFile:
             )
         reservation = self._write_coordinator.reserve()
         try:
+            if self._write_failed:
+                raise ValueError(
+                    "Cannot recover a failed write on a non-seekable archive"
+                )
+            if self.fp is None:
+                raise ValueError("Attempt to write ZIP archive that was already closed")
             zip64 = self._prepare_header(zinfo, force_zip64=force_zip64, raw=raw)
 
             assert self.fp is not None
@@ -869,6 +891,8 @@ class ZipFile:
                 raw,
             )
         except BaseException:
+            if not self._seekable:
+                self._write_failed = True
             self._write_coordinator.release(reservation)
             raise
 
@@ -878,6 +902,9 @@ class ZipFile:
         Returns whether the local header needs ZIP64 fields.
         """
         coming = zinfo.compress_size
+        zinfo._stored_filename = None
+        zinfo.aes_extra = WzAesExtra()
+        zinfo.extra = _Extra.strip(zinfo.extra, (EXTRA_WZ_AES,))
         zinfo.compress_size = 0
         if raw:
             zinfo.flag_bits &= MASK_COMPRESS_OPTIONS
@@ -1154,6 +1181,11 @@ class ZipFile:
                     target_override=target,
                     quota=quota,
                     fsync=policy.fsync_files,
+                    overwrite=(
+                        OverwritePolicy.REPLACE
+                        if policy.allow_overwrite
+                        else policy.overwrite_policy
+                    ),
                     reporter=reporter,
                 ),
                 reporter,
@@ -1169,6 +1201,7 @@ class ZipFile:
         quota: ExtractionQuota | None = None,
         fsync: bool = True,
         reporter: ProgressReporter | None = None,
+        overwrite: OverwritePolicy = OverwritePolicy.REPLACE,
     ) -> MaterializationResult:
         """Extract *member* to *targetpath* and return the materialization result.
 
@@ -1212,6 +1245,7 @@ class ZipFile:
             quota,
             fsync=fsync,
             reporter=reporter,
+            overwrite=overwrite,
         )
 
     def _mark_modified(self) -> None:
@@ -1411,20 +1445,9 @@ class ZipFile:
         else:
             raise TypeError("Expected type str or ZipInfo")  # pyright: ignore[reportUnreachable]
 
-        with self._lock:
-            assert self.fp is not None
-            if self._seekable:
-                self.fp.seek(self.start_dir)
-            zinfo.header_offset = self.fp.tell()
-            if zinfo.compress_type == ZIP_LZMA:
-                zinfo.flag_bits |= MASK_COMPRESS_OPTION_1
-
-            self._check_writable(zinfo)
-            self._mark_modified()
-
-            self._add_entry(zinfo)
-            self.fp.write(zinfo.FileHeader(False))
-            self.start_dir = self.fp.tell()
+        zinfo.compress_type = ZIP_STORED
+        with self.open(zinfo, "w", encryption=None):
+            pass
 
     def __del__(self) -> None:
         """Ensure the archive is closed when the object is garbage-collected."""
@@ -1446,8 +1469,13 @@ class ZipFile:
         """
         if self.fp is None:
             return
+        with self._lock:
+            self._close_archive()
 
+    def _close_archive(self) -> None:
         self._write_coordinator.wait_for_finalization()
+        if self.fp is None:
+            return
         if self._write_coordinator.active:
             raise ValueError(
                 "Can't close the ZIP file while there is "
@@ -1456,11 +1484,12 @@ class ZipFile:
             )
 
         try:
+            if self._write_failed:
+                raise ValueError("Cannot finalize a failed non-seekable archive")
             if self.mode in ("w", "x", "a") and self._did_modify:
-                with self._lock:
-                    if self._seekable:
-                        self.fp.seek(self.start_dir)
-                    self._write_end_record()
+                if self._seekable:
+                    self.fp.seek(self.start_dir)
+                self._write_end_record()
         finally:
             self._aes_keys.clear()
             fp = self.fp
@@ -1470,8 +1499,8 @@ class ZipFile:
     def _write_end_record(self) -> None:
         """Write the central directory and end records, then flush.
 
-        Truncates the file afterwards in append mode, since the new directory
-        may be shorter than the one it replaced.
+        Truncates seekable output afterwards, removing an old directory or
+        abandoned bytes from a failed member write.
 
         Raises:
             LargeZipFile: If ZIP64 is required but not allowed.
@@ -1484,7 +1513,7 @@ class ZipFile:
             self._comment,
             allow_zip64=self._allow_zip64,
         )
-        if self.mode == "a":
+        if self._seekable:
             self.fp.truncate()
         self.fp.flush()
 
@@ -1494,7 +1523,8 @@ class ZipFile:
         Args:
             fp: The binary file object to (conditionally) close.
         """
-        assert self._file_ref_cnt > 0
-        self._file_ref_cnt -= 1
-        if not self._file_ref_cnt and not self._file_passed:
-            fp.close()
+        with self._lock:
+            assert self._file_ref_cnt > 0
+            self._file_ref_cnt -= 1
+            if not self._file_ref_cnt and not self._file_passed:
+                fp.close()

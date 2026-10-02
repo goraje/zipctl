@@ -34,7 +34,7 @@ class PasswordProblem(Enum):
         if self is PasswordProblem.WRONG:
             return "wrong password"
         if self is PasswordProblem.CORRUPT:
-            return "local header is damaged"
+            return "corrupt data, or the password is wrong"
         return f"password required ({WAYS_TO_GIVE})"
 
 
@@ -62,39 +62,45 @@ class PasswordPool:
 
     @staticmethod
     def _status(zf: ZipFile, info: ZipInfo, password: bytes) -> PasswordStatus:
-        return zf.check_password(password, members=[info]).members[0].status
+        return zf.check_password(password, members=[info], full=True).members[0].status
 
     def resolve(self, zf: ZipFile, info: ZipInfo) -> bytes | PasswordProblem:
         """Find the password for encrypted *info*, or say why there is none."""
-        tried = False
+        problem = PasswordProblem.MISSING
         for password in self._known:
-            tried = True
+            if problem is PasswordProblem.MISSING:
+                problem = PasswordProblem.WRONG
             status = self._status(zf, info, password)
             if status is PasswordStatus.ACCEPTED:
                 return password
             if status is PasswordStatus.CORRUPT:
-                return PasswordProblem.CORRUPT
+                problem = PasswordProblem.CORRUPT
         if not self._can_prompt:
-            return PasswordProblem.WRONG if tried else PasswordProblem.MISSING
+            return problem
+        return self._prompt_for(zf, info, problem)
 
+    def _prompt_for(
+        self, zf: ZipFile, info: ZipInfo, problem: PasswordProblem
+    ) -> bytes | PasswordProblem:
         label = f"Password for {printable(info.filename)}: "
         for attempt in range(MAX_PROMPT_ATTEMPTS):
             text = self._prompt(label)
             if not text:
                 # An empty answer (or end of input) means "stop asking".
                 self._can_prompt = False
-                return PasswordProblem.WRONG if tried else PasswordProblem.MISSING
-            tried = True
+                return problem
+            if problem is PasswordProblem.MISSING:
+                problem = PasswordProblem.WRONG
             password = password_bytes(text)
             status = self._status(zf, info, password)
             if status is PasswordStatus.ACCEPTED:
                 self._known.insert(0, password)  # tried first on the next member
                 return password
             if status is PasswordStatus.CORRUPT:
-                return PasswordProblem.CORRUPT
+                problem = PasswordProblem.CORRUPT
             if attempt + 1 < MAX_PROMPT_ATTEMPTS:
                 self._ctx.err("zipctl: incorrect password, try again")
-        return PasswordProblem.WRONG
+        return problem
 
 
 def build_password_pool(

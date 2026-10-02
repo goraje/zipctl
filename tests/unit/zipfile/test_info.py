@@ -366,4 +366,5 @@ class TestFromFileFollowSymlinks:
 
     def test_describes_the_link_itself_on_request(self, link: Path) -> None:
         zi = ZipInfo.from_file(link, follow_symlinks=False)
-        assert (zi.file_size, zi.is_symlink()) == (len("target.txt"), True)
+        assert zi.file_size == link.lstat().st_size
+        assert zi.is_symlink()

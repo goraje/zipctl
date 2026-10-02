@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from zipctl.exceptions import BadZipFile
-from zipctl.zipfile.assessment import ValidationState
+from zipctl.zipfile.assessment import ExtractionContext, ValidationState
 from zipctl.zipfile.assessor import assess_member, entry_count_violation
 from zipctl.zipfile.exceptions import ExtractionFailure, ExtractionQuotaExceeded
 from zipctl.zipfile.extract import (
@@ -24,6 +24,12 @@ from zipctl.zipfile.extract import (
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.materialize import ExtractionQuota, MaterializationResult
 from zipctl.zipfile.progress import ProgressReporter
+from zipctl.zipfile.validators import (
+    ValidatorParams,
+    check_custom_validator,
+    check_extension_allowed,
+    check_extension_blocked,
+)
 
 __all__ = ["Materialize", "extract_with_policy"]
 
@@ -42,6 +48,12 @@ _MATERIALIZATION_ERRORS = (
 # Depth of the frame that called ``ZipFile.extract``/``extractall``, so warnings
 # point at the user's code rather than at library internals.
 _WARN_STACKLEVEL = 4
+
+
+class _CandidateRejected(Exception):
+    def __init__(self, violations: tuple[ExtractViolation, ...]) -> None:
+        super().__init__("Renamed extraction target violates policy")
+        self.violations: tuple[ExtractViolation, ...] = violations
 
 
 def _member_result(
@@ -64,18 +76,6 @@ def _member_result(
         violations,
         overwritten,
     )
-
-
-def _unique_target(target: Path, policy: ExtractPolicy) -> Path:
-    """Return *target*, or a numbered sibling when renaming on conflict."""
-    if policy.overwrite_policy != OverwritePolicy.RENAME or not target.exists():
-        return target
-    counter = 1
-    candidate = target
-    while candidate.exists():
-        candidate = target.with_name(f"{target.name}.{counter}")
-        counter += 1
-    return candidate
 
 
 def _rejected_result(
@@ -123,12 +123,16 @@ class _Extraction:
         self.violations: list[ExtractViolation] = violations
         self.state: ValidationState = ValidationState()
         self.total_written: int = 0
-        self.member_limit: int | None = resolve_rule(
-            policy.max_member_size, policy.on_violation
-        ).value
-        self.total_limit: int | None = resolve_rule(
+        member_rule = resolve_rule(policy.max_member_size, policy.on_violation)
+        total_rule = resolve_rule(
             policy.max_total_uncompressed_size, policy.on_violation
-        ).value
+        )
+        self.member_limit: int | None = (
+            None if member_rule.action == ViolationAction.WARN else member_rule.value
+        )
+        self.total_limit: int | None = (
+            None if total_rule.action == ViolationAction.WARN else total_rule.value
+        )
 
     def process(self, index: int, info: ZipInfo) -> ExtractMemberResult:
         if self.entry_limit is not None and index >= self.entry_limit:
@@ -159,9 +163,7 @@ class _Extraction:
             )
 
         assert target is not None
-        result = self._write(
-            info, _unique_target(target, self.policy), member_violations
-        )
+        result = self._write(info, target, member_violations)
         self.total_written += result.bytes_written
         return result
 
@@ -171,12 +173,42 @@ class _Extraction:
         target: Path,
         member_violations: tuple[ExtractViolation, ...],
     ) -> ExtractMemberResult:
-        was_existing = target.exists()
-        quota = ExtractionQuota(self.member_limit, self.total_limit, self.total_written)
+        quota = ExtractionQuota(
+            self.member_limit,
+            self.total_limit,
+            self.total_written,
+            self.state.created_directories,
+            lambda candidate: self._validate_candidate(info, candidate),
+        )
+        action = ViolationAction.ERROR
         try:
             materialized = self.materialize(info, target, quota, self.reporter)
+        except _CandidateRejected as exc:
+            self.violations.extend(exc.violations)
+            status = (
+                MemberStatus.FAILED
+                if any(v.action == ViolationAction.ERROR for v in exc.violations)
+                else MemberStatus.SKIPPED
+            )
+            return _member_result(
+                info,
+                status,
+                exc.violations[0].target,
+                0,
+                member_violations + exc.violations,
+            )
+        except FileExistsError as exc:
+            code, message = "overwrite", str(exc)
+            if self.policy.overwrite_policy == OverwritePolicy.SKIP:
+                action = ViolationAction.SKIP
         except ExtractionQuotaExceeded as exc:
             code, message = exc.code, str(exc)
+            field = (
+                self.policy.max_member_size
+                if code == "actual_member_size"
+                else self.policy.max_total_uncompressed_size
+            )
+            action = resolve_rule(field, self.policy.on_violation).action
         except _MATERIALIZATION_ERRORS as exc:
             code, message = "extraction_error", str(exc)
         else:
@@ -186,16 +218,42 @@ class _Extraction:
                 materialized.target,
                 materialized.bytes_written,
                 member_violations,
-                was_existing,
+                materialized.overwritten,
             )
 
-        violation = ExtractViolation(
-            info.filename, code, message, ViolationAction.ERROR, target
-        )
+        violation = ExtractViolation(info.filename, code, message, action, target)
         self.violations.append(violation)
         return _member_result(
-            info, MemberStatus.FAILED, target, 0, member_violations + (violation,)
+            info,
+            MemberStatus.SKIPPED
+            if action == ViolationAction.SKIP
+            else MemberStatus.FAILED,
+            target,
+            0,
+            member_violations + (violation,),
         )
+
+    def _validate_candidate(self, info: ZipInfo, target: Path) -> None:
+        params = ValidatorParams(
+            info,
+            target,
+            ExtractionContext(self.destination, self.policy_root, None, self.policy),
+            self.state,
+        )
+        violations = tuple(
+            v
+            for validator in (
+                check_extension_allowed,
+                check_extension_blocked,
+                check_custom_validator,
+            )
+            for v in validator(params)
+        )
+        if any(v.action != ViolationAction.WARN for v in violations):
+            raise _CandidateRejected(violations)
+        self.violations.extend(violations)
+        for violation in violations:
+            warnings.warn(violation.message, stacklevel=_WARN_STACKLEVEL)
 
 
 def _summarise(

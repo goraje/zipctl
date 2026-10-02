@@ -60,6 +60,9 @@ class _ArchiveDefaults(Protocol):
     @property
     def compresslevel(self) -> int | None: ...
 
+    @property
+    def _strict_timestamps(self) -> bool: ...
+
 
 # ---------------------------------------------------------------------------
 # AES extra-field dataclass
@@ -263,6 +266,7 @@ class ZipInfo:
         "raw_time",
         "_end_offset",
         "aes_extra",
+        "_stored_filename",
     )
 
     def __init__(
@@ -285,6 +289,7 @@ class ZipInfo:
             ValueError: If ``date_time[0]`` is earlier than 1980.
         """
         self.orig_filename: str = filename  # Original file name in archive
+        self._stored_filename: tuple[bytes, int] | None = None
 
         # Terminate the file name at the first null byte and
         # ensure paths always use forward slashes as the directory separator.
@@ -518,12 +523,12 @@ class ZipInfo:
                 file_size,
                 compress_size,
             )
-        if requires_zip64:
-            if not zip64:
-                raise LargeZipFile("Filesize would require ZIP64 extensions")
+        if zip64:
             file_size = 0xFFFFFFFF
             compress_size = 0xFFFFFFFF
             min_version = ZIP64_VERSION
+        elif requires_zip64:
+            raise LargeZipFile("Filesize would require ZIP64 extensions")
         return extra, file_size, compress_size, min_version
 
     def _zip64_central_extra(self) -> tuple[bytes, int, int, int, int]:
@@ -570,7 +575,7 @@ class ZipInfo:
         else:
             zip64_extra = b""
         # Preserve existing extra data, stripping any old ZIP64 entry first
-        existing_extra = _Extra.strip(self.extra, (_EXTRA_ZIP64,))
+        existing_extra = _Extra.strip(self.extra, (_EXTRA_ZIP64, EXTRA_WZ_AES))
         extra_data = zip64_extra + existing_extra
         return extra_data, file_size, compress_size, header_offset, min_version
 
@@ -781,7 +786,7 @@ class ZipInfo:
 
         extract_version = max(min_version, self.extract_version)
         create_version = max(min_version, self.create_version)
-        filename, flag_bits = self._encode_filename_flags()
+        filename, flag_bits = self._stored_filename or self._encode_filename_flags()
         # Writing multi-disk archives is not supported so disk_start is always 0
         disk_start = 0
         return self._encode_central_directory(
@@ -923,6 +928,10 @@ class ZipInfo:
             if is_central_directory and self.header_offset == 0xFFFF_FFFF:
                 field = "Header offset"
                 (self.header_offset,) = struct.unpack("<Q", data[:8])
+                data = data[8:]
+            if is_central_directory and self.volume == 0xFFFF:
+                field = "Disk number"
+                (self.volume,) = struct.unpack("<L", data[:4])
         except struct.error:
             raise BadZipFile(f"Corrupt zip64 extra field. {field} not found.") from None
 
@@ -1091,7 +1100,20 @@ class ZipInfo:
                 get_time = int(time.time())
         else:
             get_time = int(time.time())
-        self.date_time = time.localtime(get_time)[:6]
+        try:
+            self.date_time = time.localtime(get_time)[:6]
+        except (OverflowError, OSError, ValueError) as exc:
+            raise ValueError(
+                "SOURCE_DATE_EPOCH is outside the supported timestamp range"
+            ) from exc
+        if not 1980 <= self.date_time[0] <= 2107:
+            if archive._strict_timestamps:  # pyright: ignore[reportPrivateUsage]  # archive defaults protocol
+                raise ValueError("ZIP timestamps must be between 1980 and 2107")
+            self.date_time = (
+                (1980, 1, 1, 0, 0, 0)
+                if self.date_time[0] < 1980
+                else (2107, 12, 31, 23, 59, 58)
+            )
 
         self.compress_type = archive.compression
         self.compress_level = archive.compresslevel

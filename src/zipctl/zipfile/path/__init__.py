@@ -33,6 +33,34 @@ from zipctl.zipfile.shared import ReadWriteMode, StrPath
 __all__ = ["Path"]
 
 
+def _validate_open(
+    mode: str,
+    encoding: str | None,
+    errors: str | None,
+    newline: str | None,
+    line_buffering: bool,
+    write_through: bool,
+) -> None:
+    if mode not in ("r", "rb", "w", "wb"):
+        raise ValueError("mode must be r, rb, w or wb")
+    if "b" in mode:
+        if (
+            encoding is not None
+            or errors is not None
+            or newline is not None
+            or line_buffering
+            or write_through
+        ):
+            raise ValueError("encoding args invalid for binary operation")
+    else:
+        # Let the actual text wrapper validate codecs, newline and argument types
+        # before opening a writer that could change the archive.
+        with io.TextIOWrapper(
+            io.BytesIO(), encoding, errors, newline, line_buffering, write_through
+        ):
+            pass
+
+
 def _parents(path: str) -> Iterator[str]:
     """Generate all parent segments of *path* (excluding *path* itself).
 
@@ -357,6 +385,7 @@ class Path:
             FileNotFoundError: If reading and this path does not exist.
             ValueError: If binary mode is combined with text-mode arguments.
         """
+        _validate_open(mode, encoding, errors, newline, line_buffering, write_through)
         if self.is_dir():
             raise IsADirectoryError(self)
         zip_mode = cast(ReadWriteMode, mode[0])
@@ -364,14 +393,6 @@ class Path:
             raise FileNotFoundError(self)
         stream = self.root.open(self.at, zip_mode, pwd)
         if "b" in mode:
-            if (
-                encoding is not None
-                or errors is not None
-                or newline is not None
-                or line_buffering
-                or write_through
-            ):
-                raise ValueError("encoding args invalid for binary operation")
             return stream
         return io.TextIOWrapper(
             stream, encoding, errors, newline, line_buffering, write_through

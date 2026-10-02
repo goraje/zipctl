@@ -6,6 +6,8 @@ from typing import Callable
 
 from typing_extensions import override
 
+from zipctl.limits import ArchiveLimits
+
 __all__ = [
     "BZIP2_VERSION",
     "LZMA_VERSION",
@@ -75,6 +77,10 @@ class NoopCompressor(CompressorBase):
 
 class DecompressorBase(ABC):
     """Abstract base class defining the minimal interface for all decompressors."""
+
+    def configure_limits(self, limits: ArchiveLimits) -> None:
+        """Apply decoder budgets; custom codecs may override this hook."""
+        del limits
 
     @property
     @abstractmethod

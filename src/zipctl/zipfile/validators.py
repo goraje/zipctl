@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
+import posixpath
 import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -20,7 +22,7 @@ from zipctl.zipfile.extract import (
 )
 from zipctl.zipfile.info import ZipInfo
 
-_WINDOWS_ILLEGAL_NAME_CHARS = ':<>|"?*'
+_WINDOWS_ILLEGAL_NAME_CHARS = ':<>|"?*' + "".join(chr(i) for i in range(32))
 _WINDOWS_ILLEGAL_NAME_TABLE = str.maketrans(
     _WINDOWS_ILLEGAL_NAME_CHARS, "_" * len(_WINDOWS_ILLEGAL_NAME_CHARS)
 )
@@ -104,7 +106,7 @@ def _sanitize_windows_name(arcname: str, pathsep: str) -> str:
 
 def member_target_name(raw_name: str) -> tuple[str, list[str]]:
     target_name = raw_name.replace("/", os.path.sep)
-    drive, _ = os.path.splitdrive(raw_name)
+    drive, _ = ntpath.splitdrive(raw_name)
     if os.path.sep == "\\":
         target_name = _sanitize_windows_name(target_name, os.path.sep)
     parts = [
@@ -119,8 +121,8 @@ def resolve_extract_target(
     info: ZipInfo, destination: Path
 ) -> tuple[Path, str, list[str]]:
     """Resolve the filesystem target for *info*. Pure — produces no violations."""
-    drive, parts = member_target_name(info.orig_filename)
-    target = (destination / os.path.sep.join(parts)).resolve()
+    drive, parts = member_target_name(info.filename)
+    target = destination / os.path.sep.join(parts)
     return target, drive, parts
 
 
@@ -129,7 +131,9 @@ def check_absolute_path(params: ValidatorParams) -> Iterable[ExtractViolation]:
     rule = resolve_rule(
         context.policy.allow_absolute_paths, context.policy.on_violation
     )
-    if os.path.isabs(info.orig_filename) and not rule.value:
+    if (
+        posixpath.isabs(info.filename) or ntpath.isabs(info.filename)
+    ) and not rule.value:
         yield _violation(
             info, "absolute_path", "absolute path is not allowed", action=rule.action
         )
@@ -137,8 +141,8 @@ def check_absolute_path(params: ValidatorParams) -> Iterable[ExtractViolation]:
 
 def check_windows_drive_and_unc(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, context = params.info, params.context
-    raw = info.orig_filename
-    drive, _ = os.path.splitdrive(raw)
+    raw = info.filename
+    drive, _ = ntpath.splitdrive(raw)
     rule = resolve_rule(
         context.policy.allow_windows_drive_paths, context.policy.on_violation
     )
@@ -157,7 +161,7 @@ def check_windows_drive_and_unc(params: ValidatorParams) -> Iterable[ExtractViol
 
 def check_parent_traversal(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, context = params.info, params.context
-    raw = info.orig_filename
+    raw = info.filename
     rule = resolve_rule(
         context.policy.allow_parent_traversal, context.policy.on_violation
     )
@@ -173,7 +177,7 @@ def check_parent_traversal(params: ValidatorParams) -> Iterable[ExtractViolation
 def check_outside_root(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, context = params.info, params.target, params.context
     try:
-        target.relative_to(context.policy_root.resolve())
+        target.resolve().relative_to(context.policy_root.resolve())
     except ValueError:
         yield _violation(
             info,
@@ -209,7 +213,8 @@ def check_duplicate_target(params: ValidatorParams) -> Iterable[ExtractViolation
 def check_overwrite_conflict(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, policy = params.info, params.target, params.context.policy
     if (
-        target.exists()
+        os.path.lexists(target)
+        and not (info.is_dir() and target.resolve() in params.state.created_directories)
         and not policy.allow_overwrite
         and policy.overwrite_policy
         not in (OverwritePolicy.REPLACE, OverwritePolicy.RENAME)
@@ -269,8 +274,10 @@ def extension_chains(filename: str) -> frozenset[str]:
 def check_extension_allowed(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, context = params.info, params.target, params.context
     rule = resolve_rule(context.policy.allowed_extensions, context.policy.on_violation)
-    if rule.value is not None and extension_chains(info.filename).isdisjoint(
-        rule.value
+    if (
+        not info.is_dir()
+        and rule.value is not None
+        and extension_chains(target.name).isdisjoint(rule.value)
     ):
         yield _violation(
             info,
@@ -284,8 +291,10 @@ def check_extension_allowed(params: ValidatorParams) -> Iterable[ExtractViolatio
 def check_extension_blocked(params: ValidatorParams) -> Iterable[ExtractViolation]:
     info, target, context = params.info, params.target, params.context
     rule = resolve_rule(context.policy.blocked_extensions, context.policy.on_violation)
-    if rule.value is not None and not extension_chains(info.filename).isdisjoint(
-        rule.value
+    if (
+        not info.is_dir()
+        and rule.value is not None
+        and not extension_chains(target.name).isdisjoint(rule.value)
     ):
         yield _violation(
             info, "extension_blocked", "extension is blocked", target, rule.action

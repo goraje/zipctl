@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import zlib
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -406,17 +407,18 @@ def test_a_closed_output_pipe_is_a_quiet_exit_not_a_traceback(
 ) -> None:
     names = [f"a/rather/long/directory/name/{i:06d}.txt" for i in range(6000)]
     path = write_archive(workdir / "big.zip", [(name, b"") for name in names])
-    proc = subprocess.Popen(
+    proc: subprocess.Popen[bytes] = subprocess.Popen(
         command("list", str(path)),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=clean_env(),
     )
     assert proc.stdout is not None
-    assert proc.stdout.readline() == names[0].encode() + b"\n"
+    first_line = cast(bytes, cast(object, proc.stdout.readline()))
+    assert first_line.rstrip(b"\r\n") == names[0].encode()
     proc.stdout.close()
     stderr = proc.stderr.read() if proc.stderr else b""
-    assert proc.wait(timeout=60) == 141
+    assert proc.wait(timeout=60) == 141, stderr
     assert stderr == b""
 
 

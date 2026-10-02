@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 from collections.abc import Callable
 
@@ -75,3 +76,11 @@ def test_without_json_standard_output_stays_empty(
     _install(monkeypatch, CliError("bad thing"))
     assert main(["list", "a.zip"]) == 1
     assert capsys.readouterr().out == ""
+
+
+def test_unrelated_invalid_argument_is_not_a_broken_pipe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _install(monkeypatch, OSError(errno.EINVAL, "Invalid argument", "archive.zip"))
+    assert main(["list", "archive.zip"]) == 1
+    assert "archive.zip" in capsys.readouterr().err

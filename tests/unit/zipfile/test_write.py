@@ -44,6 +44,8 @@ class _FakeArchive:
         self.filelist: list[ZipInfo] = []
         self.NameToInfo: dict[str, ZipInfo] = {}
         self.modified: bool = False
+        self._seekable: bool = True
+        self._write_failed: bool = False
 
     def _mark_modified(self) -> None:
         self.modified = True

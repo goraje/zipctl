@@ -3,7 +3,38 @@ from __future__ import annotations
 import io
 import threading
 from collections.abc import Callable
-from typing import IO
+from typing import IO, Protocol
+
+
+class Readable(Protocol):
+    def read(self, size: int, /) -> bytes: ...
+
+
+def write_all(file: IO[bytes], data: bytes) -> None:
+    """Write a complete record, including on streams that accept partial writes."""
+    view = memoryview(data)
+    while view:
+        count = file.write(view)
+        if count is None or count <= 0:  # pyright: ignore[reportUnnecessaryComparison]
+            raise BlockingIOError("Stream made no progress while writing")
+        if count > len(view):
+            raise OSError("Stream reported more bytes written than supplied")
+        view = view[count:]
+
+
+def read_exactly(file: Readable, size: int) -> bytes:
+    """Read a bounded ZIP record, tolerating short reads but not truncation."""
+    parts: list[bytes] = []
+    remaining = size
+    while remaining:
+        data = file.read(remaining)
+        if not data:
+            raise EOFError("Truncated ZIP record")
+        if len(data) > remaining:
+            raise OSError("Stream returned more bytes than requested")
+        parts.append(data)
+        remaining -= len(data)
+    return b"".join(parts)
 
 
 class ClosableZipStream:
@@ -158,8 +189,8 @@ class Tellable:
             The number of bytes written.
         """
         n = self.fp.write(data)
-        if n != len(data):
-            raise io.BlockingIOError(0, "short write", len(data) - n)
+        if n is None or n <= 0 and data:  # pyright: ignore[reportUnnecessaryComparison]
+            raise BlockingIOError("Stream made no progress while writing")
         self.offset += n
         return n
 

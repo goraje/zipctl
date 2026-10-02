@@ -21,6 +21,11 @@ PASSWORD = b"correct horse"
 DATA = b"payload " * 500
 
 
+def test_negative_cache_size_is_rejected() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        AesKeyCache(-1)
+
+
 @pytest.fixture
 def archive() -> bytes:
     buffer = io.BytesIO()

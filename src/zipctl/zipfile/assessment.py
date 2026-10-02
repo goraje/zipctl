@@ -26,6 +26,7 @@ class ValidationState:
     total_compressed: int = 0
     targets: dict[Path, str] = field(default_factory=dict)
     names: dict[str, int] = field(default_factory=dict)
+    created_directories: set[Path] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

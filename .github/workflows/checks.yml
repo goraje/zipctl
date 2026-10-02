@@ -1,0 +1,224 @@
+name: compatibility checks
+
+on:
+  workflow_call:
+    inputs:
+      wheel-artifact:
+        description: Existing wheel artifact to validate for this exact commit
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  no-hardlinks:
+    name: Real FAT filesystem publication
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-extras
+      - name: Create disposable FAT filesystem
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools
+          truncate -s 64M "$RUNNER_TEMP/zipctl-fat.img"
+          mkfs.vfat "$RUNNER_TEMP/zipctl-fat.img"
+          mkdir "$RUNNER_TEMP/zipctl-fat"
+          sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/zipctl-fat.img" "$RUNNER_TEMP/zipctl-fat"
+      - run: uv run pytest -v tests/deployment/test_filesystems.py -k real_filesystem
+        env:
+          ZIPCTL_NO_HARDLINK_ROOT: ${{ runner.temp }}/zipctl-fat
+      - if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/zipctl-fat"; then
+            sudo umount "$RUNNER_TEMP/zipctl-fat"
+          fi
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run typos
+        run: uvx typos
+
+      - name: Run ruff check
+        run: uvx ruff check .
+
+      - name: Run ruff format
+        run: uvx ruff format --check .
+
+  ty:
+    name: ty
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run ty check
+        run: uv run --all-extras --group dev --with ty ty check
+
+  basedpyright:
+    name: basedpyright
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run basedpyright
+        run: uv run --all-extras --group dev --with basedpyright basedpyright
+
+  mypy:
+    name: mypy ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install project and dev dependencies
+        run: uv sync --all-extras
+
+      - name: Run mypy --strict
+        run: uv run mypy --strict src tests
+
+  pytest:
+    name: pytest ${{ matrix.os }} Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    needs: [lint, ty, basedpyright, mypy]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install project and dev dependencies
+        run: uv sync --all-extras
+
+      - name: Run full applicable suite
+        run: uv run pytest -v tests --cov=src/zipctl --cov-report=term
+
+  wheel:
+    name: Prepare wheel for isolated installation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - if: inputs.wheel-artifact == ''
+        run: uv build --wheel
+      - if: inputs.wheel-artifact == ''
+        run: uvx twine check dist/*.whl
+      - if: inputs.wheel-artifact == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: checked-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  installed-wheel:
+    name: installed wheel ${{ matrix.os }}
+    needs: wheel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.wheel-artifact || 'checked-wheel' }}
+          path: dist
+      - name: Check all Python versions and dependency configurations
+        run: uv run --no-project --python 3.14 python tests/packaging/check_matrix.py --wheel-dir dist
+
+  pytest-windows-7zip:
+    name: 7-zip
+    runs-on: windows-latest
+    needs: [lint, ty, basedpyright, mypy]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Verify 7-Zip
+        shell: pwsh
+        run: 7z i
+
+      - name: Install project and dev dependencies
+        run: uv sync --all-extras
+
+      - name: Run 7-Zip interoperability tests
+        run: uv run pytest -v -m windows tests/functional/test_7zip_interop.py tests/functional/cli/test_7zip_cli.py

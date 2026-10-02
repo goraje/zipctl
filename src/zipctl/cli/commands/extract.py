@@ -70,7 +70,11 @@ class ExtractArgs(OutputArgs, PasswordArgs, PolicyArgs, ProgressArgs, Protocol):
 def _extraction_policy(args: ExtractArgs, ctx: Context) -> ExtractPolicy:
     policy = load_policy(args, ctx)
     if args.overwrite is not None:
-        policy = replace(policy, overwrite_policy=OverwritePolicy(args.overwrite))
+        policy = replace(
+            policy,
+            allow_overwrite=False,
+            overwrite_policy=OverwritePolicy(args.overwrite),
+        )
     if args.no_fsync:
         policy = replace(policy, fsync_files=False)
     if args.dry_run:

@@ -40,6 +40,7 @@ from zipctl.cli.commands.helpers.progress import (
 )
 from zipctl.cli.context import Context
 from zipctl.cli.errors import EXIT_OK, CliError, UsageError, os_error_text
+from zipctl.cli.limits import current_limits
 from zipctl.cli.methods import (
     COMPRESSION,
     NO_ENCRYPTION,
@@ -149,6 +150,7 @@ def _write_archive(job: CreateJob, renderer: ProgressRenderer | None) -> list[Ad
             compression=job.compression,
             compresslevel=job.level,
             strict_timestamps=False,
+            limits=current_limits.get(),
         ) as zf:
             first = len(zf.infolist())
             if job.comment is not None:
@@ -359,6 +361,7 @@ def register(subparsers: Subparsers) -> None:
         help="add to ARCHIVE if it exists",
     )
     parser.add_argument(
+        "-m",
         "--compression",
         choices=list(COMPRESSION),
         default="deflate",

@@ -46,9 +46,9 @@ def test_policy_rename_does_not_overwrite_existing_target(tmp_path: Path) -> Non
             ),
         )
 
-    assert result.members[0].target == output / "file.txt.1"
+    assert result.members[0].target == output / "file.1.txt"
     assert (output / "file.txt").read_bytes() == b"original"
-    assert (output / "file.txt.1").read_bytes() == b"new"
+    assert (output / "file.1.txt").read_bytes() == b"new"
 
 
 def test_policy_enforces_member_quota_before_writing(tmp_path: Path) -> None:
@@ -178,7 +178,7 @@ def test_policy_preview_is_a_real_dry_run(tmp_path: Path) -> None:
     assert not destination.exists()
 
 
-def test_runtime_quota_preserves_existing_file(tmp_path: Path) -> None:
+def test_error_quota_preserves_existing_file(tmp_path: Path) -> None:
     archive = tmp_path / "quota.zip"
     destination = tmp_path / "out"
     destination.mkdir()
@@ -190,18 +190,14 @@ def test_runtime_quota_preserves_existing_file(tmp_path: Path) -> None:
         zf.writestr("second.txt", b"replacement")
 
     with zipctl.ZipFile(archive) as zf:
-        with pytest.warns(
-            UserWarning, match="total declared uncompressed size exceeds policy limit"
-        ):
-            with pytest.raises(zipctl.ExtractionError):
-                zf.extractall(
-                    destination,
-                    policy=zipctl.ExtractPolicy(
-                        max_total_uncompressed_size=5,
-                        on_violation=zipctl.ViolationAction.WARN,
-                        overwrite_policy=zipctl.OverwritePolicy.REPLACE,
-                    ),
-                )
+        with pytest.raises(zipctl.ExtractionError):
+            zf.extractall(
+                destination,
+                policy=zipctl.ExtractPolicy(
+                    max_total_uncompressed_size=5,
+                    overwrite_policy=zipctl.OverwritePolicy.REPLACE,
+                ),
+            )
 
     assert existing.read_bytes() == b"original"
     assert not list(destination.glob(".zipctl-*"))

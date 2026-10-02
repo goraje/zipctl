@@ -17,7 +17,7 @@ posix_only = pytest.mark.skipif(os.name != "posix", reason="requires symlinks")
 START = ProgressPhase.START
 PROGRESS = ProgressPhase.PROGRESS
 FINISH = ProgressPhase.FINISH
-BIG = 1_000_000
+BIG = 3_000_000
 
 
 def _archive(files: dict[str, bytes]) -> io.BytesIO:

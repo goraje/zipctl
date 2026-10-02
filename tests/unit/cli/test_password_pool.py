@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 from typing import cast
 
 from tests.unit.cli.conftest import new_context
+from zipctl import ZIP_CRYPTO
 from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
 from zipctl.zipfile.file import ZipFile
 from zipctl.zipfile.info import ZipInfo
@@ -27,9 +29,10 @@ class FakeZip:
         self.checked: list[bytes] = []
 
     def check_password(
-        self, password: bytes, members: list[ZipInfo]
+        self, password: bytes, members: list[ZipInfo], *, full: bool = False
     ) -> PasswordCheckResult:
         name = members[0].filename
+        assert full
         self.checked.append(password)
         if name in self.corrupt:
             status = PasswordStatus.CORRUPT
@@ -141,5 +144,20 @@ def test_end_of_input_counts_as_an_empty_answer() -> None:
 
 def test_problem_wording() -> None:
     assert PasswordProblem.WRONG.text == "wrong password"
-    assert PasswordProblem.CORRUPT.text == "local header is damaged"
+    assert PasswordProblem.CORRUPT.text == "corrupt data, or the password is wrong"
     assert PasswordProblem.MISSING.text.startswith("password required")
+
+
+def test_verifier_collision_does_not_hide_correct_password() -> None:
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w", encryption=ZIP_CRYPTO, compression=8) as archive:
+        archive.setpassword(b"correct")
+        archive.writestr("file.txt", b"payload")
+    with ZipFile(buffer) as archive:
+        collision = next(
+            str(index).encode()
+            for index in range(20000)
+            if archive.check_password(str(index).encode()).ok
+        )
+        shared = pool(collision, b"correct")
+        assert shared.resolve(archive, archive.infolist()[0]) == b"correct"

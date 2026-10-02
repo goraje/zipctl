@@ -210,7 +210,8 @@ def test_names_and_contents_of_unusual_files(cli: CliRunner, workdir: Path) -> N
     tree = workdir / "odd"
     tree.mkdir()
     (tree / "with space.txt").write_bytes(b"s")
-    (tree / "[brackets]*?.txt").write_bytes(b"b")
+    unusual_name = "[brackets].txt" if os.name == "nt" else "[brackets]*?.txt"
+    (tree / unusual_name).write_bytes(b"b")
     (tree / ".hidden").write_bytes(b"h")
     (tree / "big.bin").write_bytes(os.urandom(3 * 1024 * 1024))
     result = make(cli, workdir, str(tree))
@@ -218,7 +219,7 @@ def test_names_and_contents_of_unusual_files(cli: CliRunner, workdir: Path) -> N
     stored = contents(workdir / "out.zip")
     assert {Path(n).name for n in stored} == {
         "with space.txt",
-        "[brackets]*?.txt",
+        unusual_name,
         ".hidden",
         "big.bin",
     }
@@ -403,6 +404,11 @@ def test_comment(cli: CliRunner, workdir: Path) -> None:
     assert make(cli, workdir, "c.txt", "--comment", "héllo").returncode == 0
     with ZipFile(workdir / "out.zip") as zf:
         assert zf.comment.decode() == "héllo"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="oversized arguments exceed Windows limits")
+def test_oversized_comment(cli: CliRunner, workdir: Path) -> None:
+    (workdir / "c.txt").write_bytes(b"x")
     too_long = make(
         cli, workdir, "c.txt", "--comment", "x" * 70000, "--force", cwd=workdir
     )
@@ -720,6 +726,7 @@ def test_a_comment_is_applied_when_appending(cli: CliRunner, workdir: Path) -> N
         assert zf.namelist() == ["a.txt", "b.txt"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows argv replaces lone surrogates")
 def test_a_comment_that_is_not_utf8_is_a_usage_error(
     cli: CliRunner, workdir: Path
 ) -> None:

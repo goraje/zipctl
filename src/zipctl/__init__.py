@@ -7,7 +7,14 @@ from zipctl.compression import (
     Registry,
 )
 from zipctl.cryptography import WZ_AES, WZ_AES_V1, WZ_AES_V2, ZIP_CRYPTO
-from zipctl.exceptions import BadPassword, PasswordError, PasswordRequired
+from zipctl.exceptions import (
+    BadPassword,
+    BadZipFile,
+    LargeZipFile,
+    PasswordError,
+    PasswordRequired,
+)
+from zipctl.limits import ArchiveLimits, ArchiveResourceLimitError
 from zipctl.zipfile.assessment import ArchiveAssessment, ExtractionContext
 from zipctl.zipfile.exceptions import (
     ExtractionFailure,
@@ -35,7 +42,7 @@ from zipctl.zipfile.file import (
     ZipFileExtra,
     is_zipfile,
 )
-from zipctl.zipfile.info import WzAesExtra
+from zipctl.zipfile.info import WzAesExtra, ZipInfo
 from zipctl.zipfile.inspection import InspectionMember, InspectionResult
 from zipctl.zipfile.password import (
     MemberPasswordCheck,
@@ -54,6 +61,11 @@ from zipctl.zipfile.policy_config import (
 from zipctl.zipfile.progress import ProgressCallback, ProgressEvent, ProgressPhase
 
 __all__ = [
+    "ArchiveLimits",
+    "ArchiveResourceLimitError",
+    "ZipInfo",
+    "BadZipFile",
+    "LargeZipFile",
     "WZ_AES",
     "WZ_AES_V1",
     "WZ_AES_V2",

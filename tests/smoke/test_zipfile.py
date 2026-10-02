@@ -5,7 +5,6 @@ Covers write/read behavior across encryption and compression combinations.
 
 from __future__ import annotations
 
-import sys
 import zipfile as _stdlib_zipfile
 from pathlib import Path
 from unittest import mock
@@ -13,6 +12,7 @@ from unittest import mock
 import pytest
 
 import zipctl
+from zipctl.compression.zstd import compression_entry as zstd_entry
 
 PASSWORD = b"Cefzuj-hetveg-xifve5"
 CONTENT = "This is a test file."
@@ -26,8 +26,8 @@ COMPRESSIONS = [
         zipctl.ZIP_ZSTANDARD,
         id="ZIP_ZSTANDARD",
         marks=pytest.mark.skipif(
-            sys.version_info < (3, 14),
-            reason="zstandard tests require Python >= 3.14",
+            zstd_entry is None,
+            reason="zstandard backend is unavailable",
         ),
     ),
 ]

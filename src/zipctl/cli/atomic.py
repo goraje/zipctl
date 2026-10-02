@@ -58,12 +58,14 @@ def replacing(path: str, *, overwrite: bool, seed: bool = False) -> Generator[st
         yield scratch
         with open(scratch, "rb+") as written:
             os.fsync(written.fileno())
-        # ponytail: check-then-replace, so a file created in this instant is
-        # replaced; os.link would be exclusive but is not portable.
-        if not overwrite and os.path.lexists(target):
-            raise CliError(f"{printable(path)} already exists")
         try:
-            os.replace(scratch, target)
+            if overwrite:
+                os.replace(scratch, target)
+            else:
+                os.link(scratch, target)
+                os.unlink(scratch)
+        except FileExistsError:
+            raise CliError(f"{printable(path)} already exists") from None
         except OSError as exc:
             raise CliError(
                 f"cannot replace {printable(path)}: {os_error_text(exc)}"

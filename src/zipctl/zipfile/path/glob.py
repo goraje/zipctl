@@ -7,6 +7,7 @@ platforms when matched against POSIX-style archive member names.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Iterator
 from re import Match
@@ -73,7 +74,12 @@ class Translator:
         """Translate one token produced by :func:`separate` into regex source."""
         set_group = match.group("set")
         if set_group:
-            return set_group
+            # Retain explicit errors for reversed ranges rather than silently
+            # turning a misspelled protection rule into an empty match.
+            for span in re.finditer(r"(.)-(.)", set_group[1:-1]):
+                if ord(span[1]) > ord(span[2]):
+                    raise ValueError("invalid character range")
+            return "(?!/)" + fnmatch.translate(set_group)[4:-3]
         return (
             re.escape(match.group(0))
             .replace("\\*\\*", r".*")
@@ -101,4 +107,4 @@ class Translator:
 
 def separate(pattern: str) -> Iterator[Match[str]]:
     """Split *pattern* into literal runs and bracketed character sets."""
-    return re.finditer(r"([^\[]+)|(?P<set>[\[].*?[\]])|([\[][^\]]*$)", pattern)
+    return re.finditer(r"([^\[]+)|(?P<set>\[!?\]?[^\]]*\])|(\[)", pattern)

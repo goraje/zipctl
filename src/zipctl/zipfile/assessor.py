@@ -101,7 +101,20 @@ def assess_member(
     state: ValidationState,
 ) -> MemberAssessment:
     """Validate one member, updating the archive-wide *state*."""
-    target, _drive, _parts = resolve_extract_target(info, destination)
+    try:
+        target, _drive, _parts = resolve_extract_target(info, destination)
+        target.resolve()
+    except (OSError, ValueError, RuntimeError) as exc:
+        return MemberAssessment(
+            info,
+            None,
+            (
+                ExtractViolation(
+                    info.filename, "unsafe_destination", str(exc), ViolationAction.ERROR
+                ),
+            ),
+            *entry_type(info),
+        )
     context = ExtractionContext(destination, policy_root, None, policy)
     violations = _PIPELINE.validate(ValidatorParams(info, target, context, state))
     return MemberAssessment(

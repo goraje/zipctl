@@ -300,7 +300,10 @@ def test_an_unreadable_output_is_reported(
 
     real = ZipFile
 
-    def flaky(path: Path, mode: Literal["r", "w", "x", "a"] = "r") -> ZipFile:
+    def flaky(
+        path: Path, mode: Literal["r", "w", "x", "a"] = "r", *, limits: object = None
+    ) -> ZipFile:
+        del limits
         if mode == "r":
             raise BadZipFile("File is not a zip file")
         return real(path, mode)

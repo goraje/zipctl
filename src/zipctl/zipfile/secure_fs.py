@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 from pathlib import Path
 
 from typing_extensions import Self
@@ -44,7 +45,9 @@ class SecureExtractionRoot:
             os.close(self._descriptor)
             self._descriptor = None
 
-    def ensure_parents(self, relative_parts: tuple[str, ...]) -> int | None:
+    def ensure_parents(
+        self, relative_parts: tuple[str, ...], created: set[Path] | None = None
+    ) -> int | None:
         """Create and validate parent directories for a relative member path.
 
         Where descriptor support exists, each component is created and opened
@@ -54,22 +57,14 @@ class SecureExtractionRoot:
         close it. Returns ``None`` on the path-based fallback.
         """
         if self._descriptor is None:
-            current = self.path
-            for part in relative_parts:
-                current /= part
-                if current.is_symlink():
-                    raise ValueError("Refusing to traverse unsafe extraction path")
-                if current.exists() and not current.is_dir():
-                    raise ValueError("Refusing to traverse unsafe extraction path")
-                current.mkdir(exist_ok=True)
+            self._ensure_paths(relative_parts, created)
             return None
         fd = os.dup(self._descriptor)
+        current = self.path
         try:
             for part in relative_parts:
-                try:
-                    os.mkdir(part, dir_fd=fd)
-                except FileExistsError:
-                    pass
+                current /= part
+                _make_directory(current, part, fd, created)
                 try:
                     child = os.open(
                         part,
@@ -89,6 +84,41 @@ class SecureExtractionRoot:
             raise
         return fd
 
+    def _ensure_paths(self, parts: tuple[str, ...], created: set[Path] | None) -> None:
+        current = self.path
+        for part in parts:
+            current /= part
+            if (
+                current.is_symlink()
+                or _is_reparse_point(current)
+                or (current.exists() and not current.is_dir())
+            ):
+                raise ValueError("Refusing to traverse unsafe extraction path")
+            _make_directory(current, str(current), None, created)
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """Junctions and other Windows reparse points are not ordinary parents."""
+    if os.name != "nt":
+        return False
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+        return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except FileNotFoundError:
+        return False
+
+
+def _make_directory(
+    path: Path, name: str, fd: int | None, created: set[Path] | None
+) -> None:
+    try:
+        os.mkdir(name, dir_fd=fd)
+    except FileExistsError:
+        pass
+    else:
+        if created is not None:
+            created.add(path)
+
 
 def _parts_below(path: str, root: str) -> tuple[str, ...]:
     """Return *path*'s components below *root*, matching it textually.
@@ -107,7 +137,9 @@ def _parts_below(path: str, root: str) -> tuple[str, ...]:
     raise ValueError("Refusing to extract outside the destination")
 
 
-def open_secure_parent(path: str, root: str) -> int | None:
+def open_secure_parent(
+    path: str, root: str, created: set[Path] | None = None
+) -> int | None:
     """Create *path* below *root* without following symlinks beneath *root*.
 
     *root* is the caller's chosen destination and is trusted, so symlinks in
@@ -125,4 +157,4 @@ def open_secure_parent(path: str, root: str) -> int | None:
     """
     parts = _parts_below(path, root)
     with SecureExtractionRoot(Path(os.path.realpath(root))) as secure_root:
-        return secure_root.ensure_parents(parts)
+        return secure_root.ensure_parents(parts, created)

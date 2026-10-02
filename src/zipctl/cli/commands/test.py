@@ -55,13 +55,13 @@ class Tested:
 
 def _test_member(zf: ZipFile, info: ZipInfo, pool: PasswordPool) -> Tested:
     """Read *info* to its end."""
-    password = None
-    if info.is_encrypted:
-        resolved = pool.resolve(zf, info)
-        if isinstance(resolved, PasswordProblem):
-            return Tested(info.filename, False, resolved.text)
-        password = resolved
     try:
+        password = None
+        if info.is_encrypted:
+            resolved = pool.resolve(zf, info)
+            if isinstance(resolved, PasswordProblem):
+                return Tested(info.filename, False, resolved.text)
+            password = resolved
         with zf.open(info, pwd=password) as stream:
             while stream.read(CHUNK):
                 pass

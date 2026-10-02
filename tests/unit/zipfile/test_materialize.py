@@ -190,7 +190,9 @@ def test_fifo_is_created_with_member_permissions(tmp_path: Path) -> None:
     _extract(tmp_path, "pipe", b"", stat.S_IFIFO | 0o640)
     mode = (tmp_path / "pipe").stat().st_mode
     assert stat.S_ISFIFO(mode)
-    assert stat.S_IMODE(mode) == 0o640 & ~os.umask(0)
+    previous = os.umask(0)
+    os.umask(previous)
+    assert stat.S_IMODE(mode) == 0o640 & ~previous
 
 
 def test_unsupported_special_file_type_is_refused(tmp_path: Path) -> None:

@@ -118,7 +118,7 @@ class TestZipFileExtractSanitization:
             zf.writestr(member_name, b"safe")
 
         with ZipFile(path, "r") as zf:
-            extracted = Path(zf.extract(member_name, out))
+            extracted = Path(zf.extract(zf.infolist()[0], out))
 
         assert extracted.is_relative_to(out)
         assert extracted.read_bytes() == b"safe"

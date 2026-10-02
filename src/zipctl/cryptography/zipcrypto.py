@@ -202,6 +202,7 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
         # Force data descriptor flag so the check byte uses file time
         # (CRC is unknown at the time the encryption header is written)
         zipinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
+        zipinfo.raw_time = zipinfo.get_dostime()
         self._zinfo = zipinfo
 
     @override

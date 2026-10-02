@@ -29,6 +29,7 @@ from typing_extensions import override
 
 from zipctl.cryptography.base import BaseZipDecrypter, BaseZipEncryptor, ReadableStream
 from zipctl.exceptions import BadPassword, BadZipFile
+from zipctl.zipfile.io_wrappers import read_exactly
 
 if TYPE_CHECKING:
     from zipctl.zipfile.info import ZipInfo
@@ -100,6 +101,8 @@ class AesKeyCache:
     """
 
     def __init__(self, maxsize: int = 128) -> None:
+        if maxsize < 0:
+            raise ValueError("maxsize must be non-negative")
         self._maxsize: int = maxsize
         self._entries: OrderedDict[tuple[bytes, bytes, int], bytes] = OrderedDict()
         self._lock: threading.Lock = threading.Lock()
@@ -370,7 +373,12 @@ class AesZipDecrypter(BaseZipDecrypter):
         WZ-AES V2 relies on the HMAC alone; V1 predates that guarantee and
         also carries a CRC-32, which the base implementation checks.
         """
-        hmac_check = fileobj.read(self.hmac_size)
+        try:
+            hmac_check = read_exactly(fileobj, self.hmac_size)
+        except EOFError as exc:
+            raise BadZipFile(
+                f"Truncated HMAC check for file {self.filename!r}"
+            ) from exc
         self.check_hmac(hmac_check)
         if self._wz_aes_version == WZ_AES_V1:
             super().finalize(expected_crc, running_crc, fileobj)
@@ -462,8 +470,9 @@ class AesZipEncryptor(BaseZipEncryptor):
         """
         zipinfo.aes_extra.wz_aes_vendor_id = _WZ_AES_VENDOR_ID
         zipinfo.aes_extra.wz_aes_strength = self.aes_strength
-        if self.force_wz_aes_version is not None:
-            zipinfo.aes_extra.wz_aes_version = self.force_wz_aes_version
+        zipinfo.aes_extra.wz_aes_version = (
+            self.force_wz_aes_version or WZ_AES_DEFAULT_VERSION
+        )
 
     @override
     def encryption_header(self) -> bytes:

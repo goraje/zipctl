@@ -27,7 +27,7 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=46.0.6",
-    "typing-extensions>=4.4.0",
+    "typing-extensions>=4.6.0",
 ]
 
 [project.scripts]
@@ -111,6 +111,7 @@ reportPrivateUsage = "none"
 addopts = "-n auto"
 markers = [
     "windows: tests that require a Windows runner and 7-Zip",
+    "deployment: opt-in checks requiring a deployment-specific filesystem or provider",
 ]
 
 [tool.typos.default.extend-words]

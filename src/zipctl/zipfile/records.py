@@ -9,14 +9,20 @@ here, so :class:`~zipctl.zipfile.file.ZipFile` only deals with typed values.
 
 from __future__ import annotations
 
-import io
 import struct
 from dataclasses import dataclass
 from typing import IO
 
+from zipctl.cryptography.aes import WZ_AES_COMPRESS_TYPE
 from zipctl.exceptions import BadZipFile, LargeZipFile
+from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.info import ZipInfo
-from zipctl.zipfile.io_wrappers import ClosableZipStream
+from zipctl.zipfile.io_wrappers import (
+    ClosableZipStream,
+    Readable,
+    read_exactly,
+    write_all,
+)
 from zipctl.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_SIZE,
@@ -115,11 +121,11 @@ class ArchiveDirectory:
     infos: list[ZipInfo]
 
 
-def _read_exactly(fp: IO[bytes], size: int) -> bytes:
-    data = fp.read(size)
-    if len(data) != size:
-        raise OSError("Unknown I/O error")
-    return data
+def _read_exactly(fp: Readable, size: int) -> bytes:
+    try:
+        return read_exactly(fp, size)
+    except EOFError as exc:
+        raise BadZipFile("Truncated ZIP record") from exc
 
 
 def _apply_zip64_end_record(fp: IO[bytes], record: EndRecord) -> EndRecord:
@@ -220,36 +226,34 @@ def read_end_record(fp: IO[bytes]) -> EndRecord | None:
     """
     fp.seek(0, 2)
     file_size = fp.tell()
-
-    try:
-        fp.seek(-END_ARCHIVE_SIZE, 2)
-    except OSError:
+    if file_size < END_ARCHIVE_SIZE:
         return None
-    data = fp.read(END_ARCHIVE_SIZE)
-    if (
-        len(data) == END_ARCHIVE_SIZE
-        and data[0:4] == END_ARCHIVE_SIGNATURE
-        and data[-2:] == b"\000\000"
-    ):
-        record = _unpack_end_record(data, b"", file_size - END_ARCHIVE_SIZE)
-        return _apply_zip64_end_record(fp, record)
 
     tail_start = max(file_size - ZIP_MAX_COMMENT - END_ARCHIVE_SIZE, 0)
     fp.seek(tail_start)
-    tail = fp.read(ZIP_MAX_COMMENT + END_ARCHIVE_SIZE)
-    start = tail.rfind(END_ARCHIVE_SIGNATURE)
-    if start < 0:
-        return None
-    raw = tail[start : start + END_ARCHIVE_SIZE]
-    if len(raw) != END_ARCHIVE_SIZE:
-        return None
-    comment_size = struct.unpack(END_ARCHIVE_STRUCT, raw)[-1]
-    comment_start = start + END_ARCHIVE_SIZE
-    comment = tail[comment_start : comment_start + comment_size]
-    if len(comment) != comment_size:
-        return None
-    record = _unpack_end_record(raw, comment, tail_start + start)
-    return _apply_zip64_end_record(fp, record)
+    tail = _read_exactly(fp, file_size - tail_start)
+    return _find_end_record(fp, tail, tail_start)
+
+
+def _find_end_record(fp: IO[bytes], tail: bytes, tail_start: int) -> EndRecord | None:
+    """Prefer candidates whose declared comment reaches the physical end."""
+    candidates: list[EndRecord] = []
+    start = tail.find(END_ARCHIVE_SIGNATURE)
+    while start >= 0:
+        raw = tail[start : start + END_ARCHIVE_SIZE]
+        if len(raw) == END_ARCHIVE_SIZE:
+            size = struct.unpack(END_ARCHIVE_STRUCT, raw)[-1]
+            end = start + END_ARCHIVE_SIZE + size
+            if end <= len(tail):
+                record = _unpack_end_record(
+                    raw, tail[start + END_ARCHIVE_SIZE : end], tail_start + start
+                )
+                if end == len(tail):
+                    return _apply_zip64_end_record(fp, record)
+                candidates.append(record)
+        start = tail.find(END_ARCHIVE_SIGNATURE, start + 4)
+    # Preserve support for trailing data after the ZIP, as in CPython.
+    return _apply_zip64_end_record(fp, candidates[-1]) if candidates else None
 
 
 def looks_like_zip(fp: IO[bytes]) -> bool:
@@ -277,33 +281,53 @@ def looks_like_zip(fp: IO[bytes]) -> bool:
 
 
 def _read_directory_entry(
-    stream: IO[bytes], metadata_encoding: str | None, prepended_bytes: int, debug: int
+    stream: IO[bytes],
+    metadata_encoding: str | None,
+    prepended_bytes: int,
+    debug: int,
+    remaining: int,
+    limits: ArchiveLimits,
+    metadata_used: int,
 ) -> tuple[ZipInfo, int]:
     """Parse one central directory entry; return it and its declared length."""
-    raw = stream.read(CENTRAL_DIR_SIZE)
-    if len(raw) != CENTRAL_DIR_SIZE:
+    if remaining < CENTRAL_DIR_SIZE:
         raise BadZipFile("Truncated central directory")
+    raw = _read_exactly(stream, CENTRAL_DIR_SIZE)
     header = struct.unpack(CENTRAL_DIR_STRUCT, raw)
     if header[_CD_SIGNATURE] != CENTRAL_DIR_SIGNATURE:
         raise BadZipFile("Bad magic number for central directory")
     if debug > 2:
         print(header)
-    filename_bytes = stream.read(header[_CD_FILENAME_LENGTH])
+    declared_length = (
+        CENTRAL_DIR_SIZE
+        + header[_CD_FILENAME_LENGTH]
+        + header[_CD_EXTRA_FIELD_LENGTH]
+        + header[_CD_COMMENT_LENGTH]
+    )
+    if declared_length > remaining:
+        raise BadZipFile("Truncated central directory entry")
+    limits.check(
+        "max_metadata_bytes", metadata_used + declared_length - CENTRAL_DIR_SIZE
+    )
+    filename_bytes = _read_exactly(stream, header[_CD_FILENAME_LENGTH])
     flags = header[_CD_FLAG_BITS]
-    if flags & MASK_UTF_FILENAME:
-        filename = filename_bytes.decode("utf-8")
-    else:
-        filename = filename_bytes.decode(metadata_encoding or "cp437")
+    try:
+        filename = filename_bytes.decode(
+            "utf-8" if flags & MASK_UTF_FILENAME else metadata_encoding or "cp437"
+        )
+    except UnicodeDecodeError as exc:
+        raise BadZipFile("Invalid filename encoding") from exc
 
     info = ZipInfo(filename)
-    info.extra = stream.read(header[_CD_EXTRA_FIELD_LENGTH])
-    info.comment = stream.read(header[_CD_COMMENT_LENGTH])
+    info.extra = _read_exactly(stream, header[_CD_EXTRA_FIELD_LENGTH])
+    info.comment = _read_exactly(stream, header[_CD_COMMENT_LENGTH])
     info.header_offset = header[_CD_LOCAL_HEADER_OFFSET]
     info.create_version = header[_CD_CREATE_VERSION]
     info.create_system = header[_CD_CREATE_SYSTEM]
     info.extract_version = header[_CD_EXTRACT_VERSION]
     info.reserved = header[_CD_EXTRACT_SYSTEM]
     info.flag_bits = flags
+    info._stored_filename = (filename_bytes, flags)
     info.compress_type = header[_CD_COMPRESS_TYPE]
     dos_time = header[_CD_TIME]
     dos_date = header[_CD_DATE]
@@ -325,18 +349,22 @@ def _read_directory_entry(
         (dos_time & 0x1F) * 2,
     )
     info._decode_extra(crc32(filename_bytes))
+    has_aes = info.aes_extra.wz_aes_version is not None
+    if has_aes != (header[_CD_COMPRESS_TYPE] == WZ_AES_COMPRESS_TYPE) or (
+        has_aes and not info.is_encrypted
+    ):
+        raise BadZipFile("Inconsistent AES metadata")
+    if info.volume:
+        raise BadZipFile("zipfiles that span multiple disks are not supported")
     info.header_offset += prepended_bytes
-    declared_length = (
-        CENTRAL_DIR_SIZE
-        + header[_CD_FILENAME_LENGTH]
-        + header[_CD_EXTRA_FIELD_LENGTH]
-        + header[_CD_COMMENT_LENGTH]
-    )
     return info, declared_length
 
 
 def read_directory(
-    fp: IO[bytes], metadata_encoding: str | None = None, debug: int = 0
+    fp: IO[bytes],
+    metadata_encoding: str | None = None,
+    debug: int = 0,
+    limits: ArchiveLimits | None = None,
 ) -> ArchiveDirectory:
     """Parse the central directory of the archive in *fp*.
 
@@ -349,12 +377,22 @@ def read_directory(
         NotImplementedError: If an entry needs a newer ZIP version than is
             supported.
     """
+    limits = limits or ArchiveLimits()
     try:
         record = read_end_record(fp)
     except OSError:
         raise BadZipFile("File is not a zip file") from None
     if not record:
         raise BadZipFile("File is not a zip file")
+    limits.check("max_entries", record.entries_total)
+    limits.check("max_directory_bytes", record.size)
+    limits.check("max_metadata_bytes", len(record.comment))
+    if (
+        record.disk_number
+        or record.disk_start
+        or record.entries_this_disk != record.entries_total
+    ):
+        raise BadZipFile("zipfiles that span multiple disks are not supported")
     if debug > 1:
         print(record)
 
@@ -362,15 +400,25 @@ def read_directory(
     if start_dir < 0:
         raise BadZipFile("Bad offset for central directory")
     fp.seek(start_dir)
-    directory = io.BytesIO(fp.read(record.size))
     infos: list[ZipInfo] = []
     consumed = 0
+    metadata_used = len(record.comment)
     while consumed < record.size:
+        limits.check("max_entries", len(infos) + 1)
         info, declared_length = _read_directory_entry(
-            directory, metadata_encoding, record.prepended_bytes, debug
+            fp,
+            metadata_encoding,
+            record.prepended_bytes,
+            debug,
+            record.size - consumed,
+            limits,
+            metadata_used,
         )
         infos.append(info)
         consumed += declared_length
+        metadata_used += declared_length - CENTRAL_DIR_SIZE
+    if len(infos) != record.entries_total:
+        raise BadZipFile("Central directory entry count mismatch")
 
     end_offset = start_dir
     for info in sorted(infos, key=lambda info: info.header_offset, reverse=True):
@@ -399,28 +447,78 @@ def read_local_header(
             file name differs from the central directory.
         NotImplementedError: If the entry uses unsupported flag bits.
     """
-    raw = stream.read(FILE_HEADER_SIZE)
-    if len(raw) != FILE_HEADER_SIZE:
-        raise BadZipFile("Truncated file header")
+    raw = _read_exactly(stream, FILE_HEADER_SIZE)
     header = struct.unpack(FILE_HEADER_STRUCT, raw)
     if header[0] != FILE_HEADER_SIGNATURE:
         raise BadZipFile("Bad magic number for file header")
 
-    name = stream.read(header[_FH_FILENAME_LENGTH])
-    if header[_FH_EXTRA_FIELD_LENGTH]:
-        stream.seek(header[_FH_EXTRA_FIELD_LENGTH], whence=1)
-
+    name = _read_exactly(stream, header[_FH_FILENAME_LENGTH])
+    extra = _read_exactly(stream, header[_FH_EXTRA_FIELD_LENGTH])
     raise_for_unsupported_flags(info)
+    _validate_local_metadata(
+        header[3], header[4], header[7], header[8], header[9], extra, name, info
+    )
 
-    if header[_FH_GENERAL_PURPOSE_FLAG_BITS] & MASK_UTF_FILENAME:
-        header_name = name.decode("utf-8")
-    else:
-        header_name = name.decode(metadata_encoding or "cp437")
+    encoding = (
+        "utf-8"
+        if header[_FH_GENERAL_PURPOSE_FLAG_BITS] & MASK_UTF_FILENAME
+        else metadata_encoding or "cp437"
+    )
+    try:
+        header_name = name.decode(encoding)
+    except UnicodeDecodeError as exc:
+        raise BadZipFile("Invalid local filename encoding") from exc
     if header_name != info.orig_filename:
         raise BadZipFile(
             "File name in directory %r and header %r differ."
             % (info.orig_filename, name)
         )
+
+
+def _validate_local_metadata(
+    flags: int,
+    method: int,
+    crc: int,
+    compressed: int,
+    size: int,
+    extra: bytes,
+    name: bytes,
+    info: ZipInfo,
+) -> None:
+    """Cross-check fields that are not deferred to a data descriptor."""
+
+    expected_method = (
+        WZ_AES_COMPRESS_TYPE
+        if info.aes_extra.wz_aes_version is not None
+        else info.compress_type
+    )
+    expected_flags = (
+        info._stored_filename[1]
+        if info._stored_filename is not None
+        else info._encode_filename_flags()[1]
+    )
+    if method != expected_method or (flags ^ expected_flags) & 0x809:
+        raise BadZipFile("Local and central flags or compression method differ")
+    local = ZipInfo(info.orig_filename)
+    local.extra = extra
+    local.header_offset = info.header_offset
+    local.file_size, local.compress_size = size, compressed
+    local._decode_extra(crc32(name))
+    if expected_method == WZ_AES_COMPRESS_TYPE:
+        if (
+            local.aes_extra != info.aes_extra
+            or local.compress_type != info.compress_type
+        ):
+            raise BadZipFile("Local and central AES metadata differ")
+    elif local.aes_extra.wz_aes_version is not None:
+        raise BadZipFile("Unexpected local AES metadata")
+    expected_crc = info.CRC if info.stores_crc else 0
+    if not info.use_data_descriptor and (crc, local.compress_size, local.file_size) != (
+        expected_crc,
+        info.compress_size,
+        info.file_size,
+    ):
+        raise BadZipFile("Local and central CRC or sizes differ")
 
 
 def write_directory(
@@ -439,11 +537,10 @@ def write_directory(
     Raises:
         LargeZipFile: If ZIP64 is needed but *allow_zip64* is ``False``.
     """
-    parts: list[bytes] = []
     for info in infos:
         header, filename, extra = info.central_directory()
-        parts.extend((header, filename, extra, info.comment))
-    fp.write(b"".join(parts))
+        for part in (header, filename, extra, info.comment):
+            write_all(fp, part)
 
     directory_end = fp.tell()
     count = len(infos)
@@ -460,7 +557,8 @@ def write_directory(
     if needs_zip64:
         if not allow_zip64:
             raise LargeZipFile(needs_zip64 + " would require ZIP64 extensions")
-        fp.write(
+        write_all(
+            fp,
             struct.pack(
                 END_ARCHIVE64_STRUCT,
                 END_ARCHIVE64_SIGNATURE,
@@ -473,22 +571,24 @@ def write_directory(
                 count,
                 size,
                 offset,
-            )
+            ),
         )
-        fp.write(
+        write_all(
+            fp,
             struct.pack(
                 END_ARCHIVE64_LOCATOR_STRUCT,
                 END_ARCHIVE64_LOCATOR_SIGNATURE,
                 0,
                 directory_end,
                 1,
-            )
+            ),
         )
         count = min(count, _UINT16_MAX)
         size = min(size, _UINT32_MAX)
         offset = min(offset, _UINT32_MAX)
 
-    fp.write(
+    write_all(
+        fp,
         struct.pack(
             END_ARCHIVE_STRUCT,
             END_ARCHIVE_SIGNATURE,
@@ -499,6 +599,6 @@ def write_directory(
             size,
             offset,
             len(comment),
-        )
+        ),
     )
-    fp.write(comment)
+    write_all(fp, comment)

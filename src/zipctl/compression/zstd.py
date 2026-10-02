@@ -11,6 +11,8 @@ from zipctl.compression.methods import (
     CompressorBase,
     DecompressorBase,
 )
+from zipctl.exceptions import BadZipFile
+from zipctl.limits import ArchiveLimits, ArchiveResourceLimitError
 
 
 class _ZstdCompressorLike(Protocol):
@@ -34,7 +36,11 @@ class _ZstdModule(Protocol):
 
     def ZstdCompressor(self, *, level: int | None = None) -> _ZstdCompressorLike: ...
 
-    def ZstdDecompressor(self) -> _ZstdDecompressorLike: ...
+    def ZstdDecompressor(
+        self, *, options: dict[int, int] | None = None
+    ) -> _ZstdDecompressorLike: ...
+
+    ZstdError: type[Exception]
 
 
 def _load_zstd() -> _ZstdModule | None:
@@ -106,6 +112,16 @@ if zstd is not None:
         def __init__(self) -> None:
             """Initializes the decompressor."""
             self._d: _ZstdDecompressorLike = _module.ZstdDecompressor()
+            self._window_limit: int | None = None
+
+        @override
+        def configure_limits(self, limits: ArchiveLimits) -> None:
+            self._window_limit = limits.max_zstd_window_bytes
+            if self._window_limit is not None:
+                # ZSTD_d_windowLogMax is the stable public libzstd parameter 100.
+                self._d = _module.ZstdDecompressor(
+                    options={100: self._window_limit.bit_length() - 1}
+                )
 
         @property
         @override
@@ -132,7 +148,14 @@ if zstd is not None:
             Returns:
                 Decompressed bytes.
             """
-            return self._d.decompress(data, max_length)
+            try:
+                return self._d.decompress(data, max_length)
+            except (_module.ZstdError, EOFError) as exc:
+                if self._window_limit is not None and "memory" in str(exc).lower():
+                    raise ArchiveResourceLimitError(
+                        "Zstandard window exceeds configured limit"
+                    ) from exc
+                raise BadZipFile("Invalid Zstandard data") from exc
 
     compression_entry = CompressionEntry(
         compression_method=ZIP_ZSTANDARD,

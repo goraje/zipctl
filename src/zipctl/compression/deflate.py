@@ -8,6 +8,7 @@ from zipctl.compression.methods import (
     CompressorBase,
     StreamingDecompressor,
 )
+from zipctl.exceptions import BadZipFile
 
 try:
     import zlib
@@ -114,9 +115,10 @@ try:
             Returns:
                 Decompressed bytes, up to max_length bytes if specified.
             """
-            if max_length < 0:
-                return self._d.decompress(data)
-            return self._d.decompress(data, max_length)
+            try:
+                return self._d.decompress(data, max(0, max_length))
+            except zlib.error as exc:
+                raise BadZipFile("Invalid DEFLATE data") from exc
 
         @override
         def flush(self) -> bytes:

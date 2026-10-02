@@ -94,8 +94,8 @@ def run(
     )
     return Result(
         completed.returncode,
-        completed.stdout.decode("utf-8"),
-        completed.stderr.decode("utf-8"),
+        completed.stdout.decode("utf-8").replace("\r\n", "\n"),
+        completed.stderr.decode("utf-8").replace("\r\n", "\n"),
     )
 
 

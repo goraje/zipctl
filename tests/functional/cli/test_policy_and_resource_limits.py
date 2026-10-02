@@ -1,0 +1,141 @@
+"""End-to-end policy precedence, protection selection and resource budgets."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import struct
+import subprocess
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from tests.functional.cli.conftest import CliRunner
+from zipctl import ZIP_CRYPTO, ZipFile
+
+
+def test_explicit_overwrite_beats_loaded_legacy_setting(
+    cli: CliRunner, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.zip"
+    destination = tmp_path / "out"
+    destination.mkdir()
+    (destination / "file.txt").write_bytes(b"original")
+    with ZipFile(source, "w") as archive:
+        archive.writestr("file.txt", b"replacement")
+    result = cli(
+        "extract",
+        str(source),
+        "-d",
+        str(destination),
+        "--policy-json",
+        '{"allow_overwrite":true}',
+        "--overwrite",
+        "error",
+    )
+    assert result.returncode == 1
+    assert (destination / "file.txt").read_bytes() == b"original"
+
+
+def test_test_continues_after_unsupported_encrypted_member(
+    cli: CliRunner, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.zip"
+    with ZipFile(source, "w", encryption=ZIP_CRYPTO) as archive:
+        archive.setpassword(b"password")
+        archive.writestr("unsupported", b"payload")
+        archive.writestr("good", b"good", encryption=None)
+    data = bytearray(source.read_bytes())
+    central = data.index(b"PK\x01\x02")
+    struct.pack_into("<H", data, 8, 9)
+    struct.pack_into("<H", data, central + 10, 9)
+    source.write_bytes(data)
+    result = cli("test", str(source), "--json", env={"ZIPCTL_PASSWORD": "password"})
+    report = cast("dict[str, Any]", json.loads(result.stdout))  # pyright: ignore[reportExplicitAny]
+    assert result.returncode == 1
+    assert report["tested"] == 2
+    assert report["members"][1]["status"] == "ok"
+
+
+def test_cli_resource_override_and_scope(cli: CliRunner, tmp_path: Path) -> None:
+    source = tmp_path / "source.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("file", b"payload")
+    refused = cli("list", str(source), "--archive-max-entries", "0")
+    assert refused.returncode == 1
+    assert "resource limit" in refused.stderr
+    accepted = cli("list", str(source), "--archive-max-entries", "none")
+    assert accepted.returncode == 0
+    assert "file" in accepted.stdout
+    assert (
+        cli("list", str(source), "--archive-max-zstd-window-bytes", "3").returncode == 2
+    )
+
+
+def test_negated_protection_rule_and_compression_alias(
+    cli: CliRunner, tmp_path: Path
+) -> None:
+    (tmp_path / "a.txt").write_text("public")
+    (tmp_path / "b.txt").write_text("private")
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "rules": [
+                    {
+                        "match": "[!a].txt",
+                        "method": "aes256",
+                        "password": {"env": "SECRET"},
+                    }
+                ]
+            }
+        )
+    )
+    source = tmp_path / "source.zip"
+    result = cli(
+        "create",
+        str(source),
+        "-C",
+        str(tmp_path),
+        "a.txt",
+        "b.txt",
+        "-m",
+        "deflate",
+        "--encryption-spec",
+        str(spec),
+        env={"SECRET": "password"},
+    )
+    assert result.returncode == 0, result.stderr
+    with ZipFile(source) as archive:
+        assert not archive.getinfo("a.txt").is_encrypted
+        assert archive.getinfo("b.txt").is_encrypted
+        assert archive.read("b.txt", pwd=b"password") == b"private"
+    sevenzip = shutil.which("7z") or shutil.which("7zz")
+    if sevenzip:
+        checked = subprocess.run(
+            [sevenzip, "t", "-ppassword", str(source)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+@pytest.mark.parametrize("mutate", [False, True])
+def test_payload_corruption_agrees_with_7zip(tmp_path: Path, mutate: bool) -> None:
+    sevenzip = shutil.which("7z") or shutil.which("7zz")
+    if not sevenzip:
+        pytest.skip("7-Zip is not installed")
+    source = tmp_path / "source.zip"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("file.txt", b"payload")
+    if mutate:
+        data = bytearray(source.read_bytes())
+        data[38] ^= 0x80
+        source.write_bytes(data)
+    checked = subprocess.run(
+        [sevenzip, "t", str(source)], capture_output=True, timeout=30
+    )
+    with ZipFile(source) as archive:
+        assert (archive.testzip() is None) == (checked.returncode == 0) == (not mutate)

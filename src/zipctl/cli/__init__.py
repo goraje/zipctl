@@ -21,6 +21,8 @@ from zipctl.cli.errors import (
 )
 from zipctl.cli.output import printable, write_json
 from zipctl.cli.parser import build_parser
+from zipctl.cli.streams import normalize_output
+from zipctl.limits import ArchiveResourceLimitError
 
 __all__ = ["main"]
 
@@ -41,7 +43,10 @@ def _quiet_broken_pipe() -> None:
     """Stop Python complaining again about the closed pipe when it exits."""
     try:
         devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, sys.stdout.fileno())
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
     except (OSError, ValueError):
         pass
 
@@ -68,14 +73,26 @@ def _fail(
     return code
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI with *argv* (default: ``sys.argv[1:]``); return the exit code."""
-    ctx = Context.from_process()
+def _configure_streams(ctx: Context) -> None:
     for stream in (ctx.stdout, ctx.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(errors="backslashreplace")
 
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI with *argv* (default: ``sys.argv[1:]``); return the exit code."""
+    ctx = Context.from_process()
+    _configure_streams(ctx)
+    ctx.stdout = normalize_output(ctx.stdout)
+    try:
+        return _run(argv, ctx)
+    except BrokenPipeError:
+        _quiet_broken_pipe()
+        return EXIT_BROKEN_PIPE
+
+
+def _run(argv: Sequence[str] | None, ctx: Context) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(
@@ -90,12 +107,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(code)
     except CliError as exc:
         return _fail(ctx, args, exc, exc.message, exc.code, exc.details)
+    except ArchiveResourceLimitError as exc:
+        return _fail(ctx, args, exc, printable(str(exc)), EXIT_FAILURE)
     except KeyboardInterrupt:
         ctx.err("zipctl: interrupted")
         return EXIT_INTERRUPTED
     except BrokenPipeError:
-        _quiet_broken_pipe()
-        return EXIT_BROKEN_PIPE
+        raise
     except OSError as exc:  # whatever a command did not translate itself
         filename = os_error_filename(exc)
         where = f"{printable(filename)}: " if filename else ""

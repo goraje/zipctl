@@ -36,9 +36,6 @@ jobs:
           git fetch origin main --no-tags
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
-      - name: Run test suite
-        run: uv run --group dev pytest -q
-
       - name: Build wheel
         run: uv build --wheel
 
@@ -81,9 +78,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  checks:
+    name: Validate release commit and wheel
+    needs: build
+    uses: ./.github/workflows/checks.yml
+    with:
+      wheel-artifact: wheel
+
   publish:
     name: Publish wheel to PyPI
-    needs: build
+    needs: [build, checks]
     runs-on: ubuntu-latest
     environment:
       name: pypi

@@ -8,6 +8,7 @@ from zipctl.compression.methods import (
     CompressorBase,
     DecompressorBase,
 )
+from zipctl.exceptions import BadZipFile
 
 try:
     import bz2
@@ -88,7 +89,10 @@ try:
             Returns:
                 Decompressed bytes.
             """
-            return self._d.decompress(data, max_length)
+            try:
+                return self._d.decompress(data, max_length)
+            except (OSError, EOFError) as exc:
+                raise BadZipFile("Invalid BZIP2 data") from exc
 
     compression_entry: CompressionEntry | None = CompressionEntry(
         compression_method=ZIP_BZIP2,

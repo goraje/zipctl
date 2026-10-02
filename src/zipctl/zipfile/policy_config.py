@@ -236,6 +236,47 @@ _ACTION = _enum(ViolationAction)
 _RULE_KEYS = ("value", "on_violation")
 
 
+def validate_policy(policy: ExtractPolicy) -> None:
+    """Validate direct construction using the same field parsers as JSON."""
+    issues: list[PolicyIssue] = []
+    for name, (parser, wrappable) in _FIELDS.items():
+        raw = cast(object, getattr(policy, name))
+        if name == "destination_root" and isinstance(raw, Path):
+            raw = str(raw)
+        if isinstance(raw, ExtractPolicyRule):
+            raw = cast(ExtractPolicyRule[object], raw)
+            if not wrappable:
+                _bad(issues, name, "field does not accept a per-rule action")
+                continue
+            value = parser(raw.value, name, issues)
+            if not isinstance(value, _Invalid):
+                object.__setattr__(
+                    policy,
+                    name,
+                    None
+                    if value is None
+                    else ExtractPolicyRule(value, raw.on_violation),
+                )
+        else:
+            value = parser(raw, name, issues)
+            if not isinstance(value, _Invalid):
+                object.__setattr__(policy, name, value)
+    custom = policy.custom_validator
+    if custom is not None and not callable(custom):
+        if not isinstance(custom, (list, tuple)) or not all(
+            callable(item) for item in custom
+        ):
+            _bad(
+                issues,
+                "custom_validator",
+                "expected a callable or sequence of callables",
+            )
+        else:
+            object.__setattr__(policy, "custom_validator", tuple(custom))
+    if issues:
+        raise PolicyConfigError(issues)
+
+
 def _parse_rule(
     parser: _Parser, raw: Mapping[str, object], path: str, issues: list[PolicyIssue]
 ) -> ExtractPolicyRule[_Value] | None | _Invalid:

@@ -125,6 +125,15 @@ def _find_aes_metadata(archive: bytes) -> tuple[int, int, int, int]:
         (zipctl.ZIP_LZMA, b"large payload " * 4096),
         (zipctl.ZIP_ZSTANDARD, b"large payload " * 4096),
     ],
+    ids=[
+        "stored-small",
+        "stored-large",
+        "deflate-small",
+        "deflate-large",
+        "bzip2-large",
+        "lzma-large",
+        "zstd-large",
+    ],
 )
 def test_read1_is_bounded_and_supports_split_reads(
     tmp_path: Path,
@@ -192,7 +201,7 @@ def test_crc_mismatch_is_detected(tmp_path: Path) -> None:
     archive[central_offset + 16 : central_offset + 20] = struct.pack("<L", 0)
     path.write_bytes(archive)
 
-    with pytest.raises(BadZipFile, match="Bad CRC-32"):
+    with pytest.raises(BadZipFile, match="CRC"):
         with zipctl.ZipFile(path) as zf:
             zf.read("payload.bin")
 

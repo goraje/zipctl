@@ -1,5 +1,8 @@
 """Opt-in extraction policies and structured extraction results."""
 
+# Validation is imported lazily only after these dataclasses are defined.
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import os
@@ -63,6 +66,10 @@ class ExtractPolicyRule(Generic[_T]):
     value: _T
     on_violation: ViolationAction | None = None
 
+    def __post_init__(self) -> None:
+        if self.on_violation is not None:
+            object.__setattr__(self, "on_violation", ViolationAction(self.on_violation))
+
 
 @dataclass(frozen=True)
 class ResolvedRule(Generic[_T]):
@@ -112,6 +119,11 @@ class ExtractPolicy:
     preview_only: bool = False
     fsync_files: bool = True
     custom_validator: CustomValidator | Sequence[CustomValidator] | None = None
+
+    def __post_init__(self) -> None:
+        from zipctl.zipfile.policy_config import validate_policy
+
+        validate_policy(self)
 
 
 @dataclass(frozen=True)
