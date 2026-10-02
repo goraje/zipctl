@@ -78,6 +78,8 @@ def _render_summary(ctx: Context, destination: str, result: ExtractResult) -> No
     if result.preview_only:
         would = count(result.previewed_count, "member")
         ctx.out(f"Dry run: would extract to {target}: {would}{tail}")
+    elif not result.extracted_count and result.failed_count:
+        ctx.out(f"Nothing extracted{tail}")  # the destination may not exist
     else:
         done = count(result.extracted_count, "member")
         size = human_size(result.bytes_written)

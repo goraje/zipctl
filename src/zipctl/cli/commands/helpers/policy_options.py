@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from typing import Protocol
 
 from zipctl.cli.commands.helpers.sources import read_text_source
@@ -22,6 +23,7 @@ class PolicyArgs(Protocol):
 
     policy: str | None
     policy_json: str | None
+    max_ratio: str | None
 
 
 def add_policy_options(parser: argparse.ArgumentParser) -> None:
@@ -34,6 +36,11 @@ def add_policy_options(parser: argparse.ArgumentParser) -> None:
         "--policy-json",
         metavar="TEXT",
         help="inline JSON policy, applied on top of --policy",
+    )
+    parser.add_argument(
+        "--max-ratio",
+        metavar="N|none",
+        help="compression-ratio limit, overriding the policy. Default: 100",
     )
 
 
@@ -61,4 +68,18 @@ def load_policy(args: PolicyArgs, ctx: Context) -> ExtractPolicy:
         policy = _parse(text, f"--policy {printable(args.policy)}", policy)
     if args.policy_json is not None:
         policy = _parse(args.policy_json, "--policy-json", policy)
+    if args.max_ratio is not None:
+        policy = replace(policy, max_compression_ratio=_ratio(args.max_ratio))
     return policy
+
+
+def _ratio(text: str) -> float | None:
+    if text.lower() == "none":
+        return None
+    try:
+        ratio = float(text)
+    except ValueError:
+        ratio = 0.0
+    if not ratio > 0 or ratio == float("inf"):
+        raise UsageError("--max-ratio expects a positive number or 'none'")
+    return ratio

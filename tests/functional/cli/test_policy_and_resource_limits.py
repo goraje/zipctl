@@ -139,3 +139,39 @@ def test_payload_corruption_agrees_with_7zip(tmp_path: Path, mutate: bool) -> No
     )
     with ZipFile(source) as archive:
         assert (archive.testzip() is None) == (checked.returncode == 0) == (not mutate)
+
+
+def _zeros_archive(path: Path) -> None:
+    with ZipFile(path, "w", compression=8) as archive:
+        archive.writestr("zeros", b"0" * 5_000_000)
+
+
+def test_max_ratio_overrides_the_default_ratio_limit(
+    cli: CliRunner, tmp_path: Path
+) -> None:
+    source = tmp_path / "zeros.zip"
+    _zeros_archive(source)
+    refused = cli("extract", str(source), "-d", str(tmp_path / "a"))
+    assert refused.returncode == 1
+    assert "Nothing extracted" in refused.stdout
+    allowed = cli(
+        "extract", str(source), "-d", str(tmp_path / "b"), "--max-ratio", "none"
+    )
+    assert allowed.returncode == 0
+    assert (tmp_path / "b" / "zeros").stat().st_size == 5_000_000
+
+
+def test_max_ratio_rejects_garbage(cli: CliRunner, tmp_path: Path) -> None:
+    source = tmp_path / "zeros.zip"
+    _zeros_archive(source)
+    result = cli("extract", str(source), "--max-ratio", "-3")
+    assert result.returncode == 2
+
+
+def test_archive_budgets_accept_units(cli: CliRunner, tmp_path: Path) -> None:
+    source = tmp_path / "zeros.zip"
+    _zeros_archive(source)
+    ok = cli("list", str(source), "--archive-max-metadata-bytes", "1KiB")
+    assert ok.returncode == 0
+    bad = cli("list", str(source), "--archive-max-entries", "lots")
+    assert bad.returncode == 2
