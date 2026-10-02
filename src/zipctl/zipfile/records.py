@@ -236,8 +236,14 @@ def read_end_record(fp: IO[bytes]) -> EndRecord | None:
 
 
 def _find_end_record(fp: IO[bytes], tail: bytes, tail_start: int) -> EndRecord | None:
-    """Prefer candidates whose declared comment reaches the physical end."""
-    candidates: list[EndRecord] = []
+    """Pick the record whose declared comment reaches the physical end.
+
+    Raises:
+        BadZipFile: If several records qualify. Parsers that pick a different
+            one would disagree about the archive's contents.
+    """
+    reaching: list[EndRecord] = []
+    trailing: list[EndRecord] = []
     start = tail.find(END_ARCHIVE_SIGNATURE)
     while start >= 0:
         raw = tail[start : start + END_ARCHIVE_SIZE]
@@ -248,12 +254,13 @@ def _find_end_record(fp: IO[bytes], tail: bytes, tail_start: int) -> EndRecord |
                 record = _unpack_end_record(
                     raw, tail[start + END_ARCHIVE_SIZE : end], tail_start + start
                 )
-                if end == len(tail):
-                    return _apply_zip64_end_record(fp, record)
-                candidates.append(record)
+                (reaching if end == len(tail) else trailing).append(record)
         start = tail.find(END_ARCHIVE_SIGNATURE, start + 4)
+    if len(reaching) > 1:
+        raise BadZipFile("Ambiguous end of central directory")
     # Preserve support for trailing data after the ZIP, as in CPython.
-    return _apply_zip64_end_record(fp, candidates[-1]) if candidates else None
+    chosen = reaching or trailing[-1:]
+    return _apply_zip64_end_record(fp, chosen[0]) if chosen else None
 
 
 def looks_like_zip(fp: IO[bytes]) -> bool:

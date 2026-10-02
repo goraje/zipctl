@@ -168,3 +168,21 @@ def test_local_header_name_mismatch_is_rejected() -> None:
     with zipctl.ZipFile(_corrupt_local_header(30, b"z")) as zf:
         with pytest.raises(BadZipFile, match="differ"):
             zf.read("a.txt")
+
+
+@pytest.mark.parametrize("inner_comment", [b"", b"c"])
+def test_polyglot_end_records_are_ambiguous(inner_comment: bytes) -> None:
+    # CPython would pick the last record, others the first: refuse to choose.
+    inner = _archive(("evil.txt",), comment=inner_comment)
+    outer = bytearray(_archive(("good.txt",)))
+    outer[-2:] = len(inner).to_bytes(2, "little")
+    with pytest.raises(BadZipFile, match="Ambiguous"):
+        read_end_record(io.BytesIO(bytes(outer) + inner))
+
+
+def test_signature_inside_comment_is_not_an_end_record() -> None:
+    comment = b"x" + b"PK\x05\x06" + b"\x01" * 20 + b"y"
+    record = read_end_record(io.BytesIO(_archive(comment=comment)))
+    assert record is not None
+    assert record.comment == comment
+    assert record.entries_total == 1

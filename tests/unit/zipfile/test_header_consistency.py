@@ -9,12 +9,13 @@ from tests.unit.zipfile.archive_factory import archive_bytes
 from zipctl import WZ_AES, ArchiveLimits, BadZipFile, ZipFile
 
 
-def test_empty_end_record_inside_comment_is_not_the_archive() -> None:
+def test_empty_end_record_inside_comment_is_refused() -> None:
     buffer = io.BytesIO(archive_bytes())
     with ZipFile(buffer, "a") as archive:
         archive.comment = b"PK\x05\x06" + bytes(18)
-    with ZipFile(buffer) as archive:
-        assert archive.read("file.txt") == b"payload"
+    # CPython would read the fake record; refuse rather than pick one.
+    with pytest.raises(BadZipFile, match="Ambiguous"):
+        ZipFile(buffer)
 
 
 @pytest.mark.parametrize(
