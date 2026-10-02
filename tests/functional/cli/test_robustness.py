@@ -7,25 +7,29 @@ from pathlib import Path
 import pytest
 
 import zipctl
-from tests.functional.cli.conftest import CliRunner
+from tests.functional.cli.conftest import CliRunner, SubprocessRunner
 from tests.functional.cli.reports import ErrorReport, ListReport, load_json
 from tests.functional.cli.support import PASSWORD, data_offset, flip_byte, write_archive
 
 
 def test_an_ascii_only_terminal_gets_escapes_instead_of_a_crash(
-    cli: CliRunner, workdir: Path
+    cli_subprocess: SubprocessRunner, workdir: Path
 ) -> None:
     path = write_archive(workdir / "u.zip", [("café.txt", b"1")])
-    result = cli("list", str(path), env={"PYTHONIOENCODING": "ascii"})
+    result = cli_subprocess("list", str(path), env={"PYTHONIOENCODING": "ascii"})
     assert result.returncode == 0, result
     assert result.stdout == "caf\\xe9.txt\n"
-    listing = cli("list", "-l", str(path), env={"PYTHONIOENCODING": "ascii"})
+    listing = cli_subprocess("list", "-l", str(path), env={"PYTHONIOENCODING": "ascii"})
     assert listing.returncode == 0
     assert "caf\\xe9.txt" in listing.stdout
 
 
-def test_ascii_terminal_errors_are_escaped_too(cli: CliRunner, workdir: Path) -> None:
-    result = cli("list", str(workdir / "café.zip"), env={"PYTHONIOENCODING": "ascii"})
+def test_ascii_terminal_errors_are_escaped_too(
+    cli_subprocess: SubprocessRunner, workdir: Path
+) -> None:
+    result = cli_subprocess(
+        "list", str(workdir / "café.zip"), env={"PYTHONIOENCODING": "ascii"}
+    )
     assert result.returncode == 1
     assert "caf\\xe9.zip" in result.stderr
     assert "Traceback" not in result.stderr
