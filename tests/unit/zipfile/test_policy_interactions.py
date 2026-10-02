@@ -3,8 +3,10 @@
 import io
 import os
 from pathlib import Path
+from typing import cast
 
 import pytest
+from typing_extensions import override
 
 import zipctl
 from tests.unit.zipfile.archive_factory import archive_bytes
@@ -95,3 +97,16 @@ def test_interrupted_extraction_cleans_partial_file(tmp_path: Path) -> None:
         with pytest.raises(KeyboardInterrupt):
             archive.extractall(tmp_path, progress=interrupt)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_bad_write_argument_does_not_poison_a_nonseekable_archive() -> None:
+    class Sink(io.BytesIO):
+        @override
+        def seekable(self) -> bool:
+            return False
+
+    with ZipFile(Sink(), "w") as archive:
+        with archive.open("a", "w") as member:
+            with pytest.raises(TypeError):
+                member.write(cast("bytes", cast("object", "text")))
+            member.write(b"ok")

@@ -172,6 +172,8 @@ class ZipWriteFile(io.BufferedIOBase):
             self._ensure_active()
             if self._raw:
                 raise ValueError("a raw entry takes _write_raw, not write")
+            if not isinstance(data, (bytes, bytearray)):
+                data = memoryview(data)  # a bad argument must not fail the entry
             try:
                 return self._write(data)
             except BaseException as exc:
@@ -185,15 +187,10 @@ class ZipWriteFile(io.BufferedIOBase):
         if self.closed or self._state != WriteState.ACTIVE:
             raise ValueError("I/O operation on closed file.")
 
-    def _write(self, data: ReadableBuffer) -> int:
+    def _write(self, data: bytes | bytearray | memoryview) -> int:
         assert self._compressor is not None
 
-        # Accept any data that supports the buffer protocol
-        if isinstance(data, (bytes, bytearray)):
-            nbytes = len(data)
-        else:
-            data = memoryview(data)
-            nbytes = data.nbytes
+        nbytes = len(data) if isinstance(data, (bytes, bytearray)) else data.nbytes
         self._file_size += nbytes
 
         self._crc = crc32(data, self._crc)
