@@ -10,6 +10,7 @@ import pytest
 from typing_extensions import override
 
 from zipctl import WZ_AES, ZIP_CRYPTO, ZipFile, is_zipfile
+from zipctl.compression import zstd
 from zipctl.exceptions import BadZipFile
 from zipctl.zipfile.info import ZipInfo
 
@@ -21,7 +22,15 @@ def _archive(method: int = 0) -> bytearray:
     return bytearray(buffer.getvalue())
 
 
-@pytest.mark.parametrize("method", [0, 8, 12, 14, 93])
+ZSTD = pytest.param(
+    93,
+    marks=pytest.mark.skipif(
+        zstd.compression_entry is None, reason="zstandard backend is unavailable"
+    ),
+)
+
+
+@pytest.mark.parametrize("method", [0, 8, 12, 14, ZSTD])
 def test_declared_size_must_match_output(method: int) -> None:
     data = _archive(method)
     central = data.index(b"PK\x01\x02")
@@ -126,7 +135,7 @@ def test_is_zipfile_restores_position_after_corrupt_zip64() -> None:
     assert buffer.tell() == 5
 
 
-@pytest.mark.parametrize("method", [8, 12, 14, 93])
+@pytest.mark.parametrize("method", [8, 12, 14, ZSTD])
 def test_corrupt_codec_raises_bad_zipfile(method: int) -> None:
     data = _archive(method)
     data[38] = 7

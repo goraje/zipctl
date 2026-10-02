@@ -217,7 +217,11 @@ class Collector:
             return
         target = os.path.realpath(path)
         root = os.path.realpath(top)
-        if os.path.commonpath([root, target]) != root:
+        try:
+            inside = os.path.commonpath([root, target]) == root
+        except ValueError:  # different Windows drives
+            inside = False
+        if not inside:
             self.escaping.append((os.path.normpath(path), target))
 
     def _walk_dirs(self, root: str, dirs: list[str], prefix: str) -> None:

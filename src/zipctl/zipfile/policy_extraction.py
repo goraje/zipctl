@@ -24,6 +24,7 @@ from zipctl.zipfile.policy import (
     resolve_rule,
 )
 from zipctl.zipfile.progress import ProgressReporter
+from zipctl.zipfile.shared import user_stacklevel
 from zipctl.zipfile.validators import (
     ValidatorParams,
     check_custom_validator,
@@ -45,10 +46,6 @@ _MATERIALIZATION_ERRORS = (
     PasswordError,
     ExtractionFailure,
 )
-
-# Depth of the frame that called ``ZipFile.extract``/``extractall``, so warnings
-# point at the user's code rather than at library internals.
-_WARN_STACKLEVEL = 4
 
 
 class _CandidateRejected(Exception):
@@ -156,7 +153,7 @@ class _Extraction:
                 info, MemberStatus.SKIPPED, target, 0, member_violations
             )
         for violation in member_violations:
-            warnings.warn(violation.message, stacklevel=_WARN_STACKLEVEL)
+            warnings.warn(violation.message, stacklevel=user_stacklevel())
 
         if self.policy.preview_only:
             return _member_result(
@@ -254,7 +251,7 @@ class _Extraction:
             raise _CandidateRejected(violations)
         self.violations.extend(violations)
         for violation in violations:
-            warnings.warn(violation.message, stacklevel=_WARN_STACKLEVEL)
+            warnings.warn(violation.message, stacklevel=user_stacklevel())
 
 
 def _summarise(
@@ -310,7 +307,7 @@ def extract_with_policy(
         if count_violation.action == ViolationAction.SKIP:
             entry_limit = resolve_rule(policy.max_entries, policy.on_violation).value
         else:
-            warnings.warn(count_violation.message, stacklevel=_WARN_STACKLEVEL)
+            warnings.warn(count_violation.message, stacklevel=user_stacklevel())
 
     extraction = _Extraction(
         destination, policy_root, policy, materialize, reporter, entry_limit, violations

@@ -14,7 +14,7 @@ from zipctl.zipfile.file.stream import ArchiveStream
 from zipctl.zipfile.file.writer import ArchiveWriter
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.records import read_local_header
-from zipctl.zipfile.shared import MASK_ENCRYPTED
+from zipctl.zipfile.shared import MASK_ENCRYPTED, user_stacklevel
 
 __all__ = ["ArchiveReader"]
 
@@ -105,6 +105,6 @@ def _check_overlap(zinfo: ZipInfo, data_start: int) -> None:
         return
     message = f"Overlapped entries: {zinfo.orig_filename!r} (possible zip bomb)"
     if end == zinfo.header_offset:
-        warnings.warn(message, stacklevel=4)
+        warnings.warn(message, stacklevel=user_stacklevel())
     else:
         raise BadZipFile(message)

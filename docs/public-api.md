@@ -96,7 +96,32 @@ became `safe_extract(..., policy=P)` and `safe_extractall(..., policy=P)`.
 contain it. Empty encryption passwords raise `ValueError` for both methods
 (WZ-AES used to raise `RuntimeError`). Policy extraction no longer turns
 `ValueError` or `RuntimeError` from a member into a FAILED result; a missing
-codec backend propagates like an unsupported method. A later explicit directory entry can refer to
+codec backend propagates like an unsupported method.
+
+Further pre-1.0 changes in the same release:
+
+- Extracted files used to be created `0600` whatever the umask; they now get
+  `0o666` masked by the umask, like any program's files, so they can be more
+  readable than before.
+- `extract()`/`extractall()` (and `zipctl extract --no-policy`) write symlink
+  and special-file members as regular files instead of creating links, FIFOs
+  or failing on devices.
+- Refusals to traverse a symlinked or non-directory parent, or to leave the
+  destination, raise `ExtractionSecurityError` instead of `ValueError`; so
+  does a NUL byte in a symlink target.
+- Decompressors: `StreamingDecompressor` is removed. A codec now keeps input it
+  could not process itself and reports it through `needs_input` (the reader
+  then calls `decompress(b"")`); the reader no longer feeds `unconsumed_tail`
+  back. A codec whose format allows concatenated frames sets `concatenated`.
+  Zstandard entries of several frames are now read completely.
+- Decrypters share one constructor, `(zinfo, pwd, encryption_header,
+  key_cache=None)`, and declare `authentication_trailer_length` and
+  `authenticates_ciphertext`; `AesZipDecrypter.encryption_header_length` and
+  `ZipCryptoDecrypter.encryption_header_length` are replaced by
+  `header_length(zinfo)`, and the AES decrypter no longer accepts `str`
+  passwords.
+- `zipctl create` warns when it follows a symbolic link to a file outside the
+  directory being added. A later explicit directory entry can refer to
 a directory created for an earlier child. Rename candidates preserve suffix
 chains and are rechecked against extension and custom rules.
 

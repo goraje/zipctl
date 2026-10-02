@@ -206,9 +206,6 @@ class ZipFile:
         self.debug: int = 0
         self.compression: int = compression
         self.compresslevel: int | None = compresslevel
-        self.mode: _ZipFileMode = mode
-        self.metadata_encoding: str | None = metadata_encoding
-        self.limits: ArchiveLimits = limits or ArchiveLimits()
         self._strict_timestamps: bool = strict_timestamps
 
         self._stream: ArchiveStream = ArchiveStream(file, mode)
@@ -227,7 +224,7 @@ class ZipFile:
             self._writer,
             self._encryption,
             selected_registry,
-            self.limits,
+            limits or ArchiveLimits(),
             metadata_encoding,
         )
         try:
@@ -257,6 +254,29 @@ class ZipFile:
     def _load_directory(self, fp: IO[bytes]) -> None:
         self._directory.load(fp, self.metadata_encoding, self.debug, self.limits)
 
+    @property
+    def mode(self) -> _ZipFileMode:
+        """``'r'``, ``'w'``, ``'x'`` or ``'a'``, as opened."""
+        return cast(_ZipFileMode, self._writer.mode)
+
+    @property
+    def limits(self) -> ArchiveLimits:
+        """Parser and decoder budgets for reading members."""
+        return self._reader.limits
+
+    @limits.setter
+    def limits(self, limits: ArchiveLimits) -> None:
+        self._reader.limits = limits
+
+    @property
+    def metadata_encoding(self) -> str | None:
+        """Encoding of member names not flagged as UTF-8 (default cp437)."""
+        return self._reader.metadata_encoding
+
+    @metadata_encoding.setter
+    def metadata_encoding(self, encoding: str | None) -> None:
+        self._reader.metadata_encoding = encoding
+
     # -- zipfile-compatible attributes, kept by the collaborators -------------
 
     @property
@@ -278,10 +298,18 @@ class ZipFile:
         """Entries in central-directory order."""
         return self._directory.infos
 
+    @filelist.setter
+    def filelist(self, infos: list[ZipInfo]) -> None:
+        self._directory.infos = infos
+
     @property
     def NameToInfo(self) -> dict[str, ZipInfo]:  # noqa: N802  # the zipfile name
         """The last entry of each name."""
         return self._directory.by_name
+
+    @NameToInfo.setter
+    def NameToInfo(self, by_name: dict[str, ZipInfo]) -> None:  # noqa: N802
+        self._directory.by_name = by_name
 
     @property
     def start_dir(self) -> int:

@@ -217,3 +217,13 @@ def test_archive_close_waits_for_a_member_that_is_finishing(
     assert archive_closed.is_set()
     with ZipFile(buffer) as reopened:
         assert reopened.read("file.txt") == b"payload"
+
+
+def test_duplicate_name_warning_points_at_the_caller() -> None:
+    with ZipFile(io.BytesIO(), "w") as archive:
+        archive.writestr("a", b"1")
+        with pytest.warns(UserWarning, match="Duplicate name") as by_writestr:
+            archive.writestr("a", b"2")
+        with pytest.warns(UserWarning, match="Duplicate name") as by_open:
+            archive.open("a", "w").close()
+    assert [w.filename for w in [*by_writestr, *by_open]] == [__file__, __file__]

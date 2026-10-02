@@ -57,3 +57,18 @@ def test_zstd_window_budget() -> None:
     with ZipFile(buffer, limits=ArchiveLimits(max_zstd_window_bytes=1024)) as archive:
         with pytest.raises(ArchiveResourceLimitError, match="window"):
             archive.read("file")
+
+
+def test_limits_set_after_opening_apply_to_later_reads() -> None:
+    with ZipFile(io.BytesIO(archive_bytes(14))) as archive:
+        assert archive.read("file.txt")
+        archive.limits = ArchiveLimits(max_lzma_dictionary_bytes=4096)
+        with pytest.raises(ArchiveResourceLimitError, match="dictionary"):
+            archive.read("file.txt")
+
+
+def test_filelist_can_be_replaced_like_the_standard_library_allows() -> None:
+    with ZipFile(io.BytesIO(archive_bytes(14))) as archive:
+        archive.filelist = []
+        archive.NameToInfo = {}
+        assert archive.namelist() == []

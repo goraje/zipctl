@@ -1,5 +1,7 @@
 import os
 import struct
+import sys
+from types import FrameType
 from typing import Literal, TypeAlias
 
 try:
@@ -102,3 +104,20 @@ MASK_USE_DATA_DESCRIPTOR = 1 << 3
 # ---------------------------------------------------------------------------
 StrPath: TypeAlias = str | os.PathLike[str]
 ReadWriteMode: TypeAlias = Literal["r", "w"]
+
+
+_PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep
+
+
+def user_stacklevel() -> int:
+    """The ``stacklevel`` that makes a warning point at the caller of zipctl.
+
+    Calls reach the warning through different depths of zipctl code
+    (``writestr`` and ``write`` go through ``open``), so count them.
+    """
+    level = 1
+    frame: FrameType | None = sys._getframe(1)  # pyright: ignore[reportPrivateUsage]  # documented CPython API
+    while frame is not None and frame.f_code.co_filename.startswith(_PACKAGE_DIR):
+        frame = frame.f_back
+        level += 1
+    return level

@@ -26,6 +26,7 @@ from zipctl.zipfile.shared import (
     MASK_USE_DATA_DESCRIPTOR,
     ZIP64_LIMIT,
     ZIP_FILECOUNT_LIMIT,
+    user_stacklevel,
 )
 from zipctl.zipfile.write import ZipWriteFile
 
@@ -168,7 +169,9 @@ class ArchiveWriter:
         zinfo.header_offset = fp.tell()
         self._check_limits(zinfo)
         if zinfo.filename in self._directory.by_name:
-            warnings.warn(f"Duplicate name: {zinfo.filename!r}", stacklevel=5)
+            warnings.warn(
+                f"Duplicate name: {zinfo.filename!r}", stacklevel=user_stacklevel()
+            )
         encryptor = self._encryption.for_entry(zinfo, encryption, password, extra)
         self._directory.modified = True
         return ZipWriteFile(self, zinfo, zip64, encryptor, self._registry, raw)

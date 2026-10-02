@@ -40,6 +40,8 @@ __all__ = [
 ]
 
 _TEMP_PREFIX = ".zipctl-"
+# O_BINARY keeps Windows from translating line endings in what is written.
+_TEMP_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
 
 
 @dataclass(frozen=True)
@@ -167,9 +169,7 @@ def _open_unique_temp(directory: str, dir_fd: int | None) -> tuple[str, int]:
     for _ in range(100):
         name = _temporary_name(directory, dir_fd)
         try:
-            fd = os.open(
-                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666, dir_fd=dir_fd
-            )
+            fd = os.open(name, _TEMP_FLAGS, 0o666, dir_fd=dir_fd)
         except FileExistsError:
             continue
         return name, fd
