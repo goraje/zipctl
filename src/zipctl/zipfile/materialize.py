@@ -24,8 +24,8 @@ from zipctl.zipfile.exceptions import (
     ExtractionQuotaExceeded,
     ExtractionSecurityError,
 )
-from zipctl.zipfile.extract import OverwritePolicy
 from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import OverwritePolicy
 from zipctl.zipfile.progress import ProgressReporter
 from zipctl.zipfile.secure_fs import open_secure_parent
 from zipctl.zipfile.validators import entry_mode, has_parent_component

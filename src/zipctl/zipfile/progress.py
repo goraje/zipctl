@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 
-from zipctl.zipfile.extract import MemberStatus
 from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import MemberStatus
 
 __all__ = [
     "ProgressCallback",

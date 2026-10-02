@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zipctl.zipfile.assessment import ArchiveAssessment
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.policy import (
     ExtractViolation,
     ViolationAction,
     compression_ratio,

@@ -354,7 +354,7 @@ def test_destination_is_used_to_detect_overwrites(
     assert _codes(_json(result)) == {"readme.txt": {"overwrite"}}
     allow = cli(
         "inspect", "-d", str(dest), str(clean_archive),
-        "--policy-json", '{"allow_overwrite": true, "overwrite_policy": "replace"}',
+        "--policy-json", '{"overwrite_policy": "replace"}',
     )  # fmt: skip
     assert allow.returncode == 0, allow
 

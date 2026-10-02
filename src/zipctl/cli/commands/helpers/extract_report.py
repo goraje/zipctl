@@ -7,7 +7,7 @@ import os
 from zipctl.cli.commands.helpers.output_options import OutputOptions
 from zipctl.cli.context import Context
 from zipctl.cli.output import count, human_size, printable, write_json
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.policy import (
     ExtractMemberResult,
     ExtractResult,
     MemberStatus,

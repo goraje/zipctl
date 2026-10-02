@@ -353,7 +353,7 @@ def test_extract_into_destination_reached_through_symlink(
 
     with zipctl.ZipFile(archive) as zf:
         if use_policy:
-            zf.extractall(link, policy=zipctl.ExtractPolicy())
+            zf.safe_extractall(link, policy=zipctl.ExtractPolicy())
         else:
             zf.extractall(link)
     assert (real / "dir" / "file.txt").read_bytes() == b"data"

@@ -20,7 +20,7 @@ from typing import Any, NoReturn, TypeVar, cast
 
 from typing_extensions import override
 
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.policy import (
     ExtractPolicy,
     ExtractPolicyRule,
     OverwritePolicy,
@@ -231,6 +231,9 @@ _FIELDS: dict[str, tuple[_Parser, bool]] = {
     "preview_only": (_boolean, False),
     "fsync_files": (_boolean, False),
 }
+
+# Still read, with a DeprecationWarning, but no longer written.
+_DEPRECATED_FIELDS = frozenset({"allow_overwrite"})
 
 _ACTION = _enum(ViolationAction)
 _RULE_KEYS = ("value", "on_violation")
@@ -458,7 +461,8 @@ def policy_to_mapping(policy: ExtractPolicy) -> dict[str, Any]:  # pyright: igno
         )
     document: dict[str, _Json] = {"version": POLICY_FORMAT_VERSION}
     for name in _FIELDS:
-        document[name] = _dump(getattr(policy, name))  # pyright: ignore[reportAny]
+        if name not in _DEPRECATED_FIELDS:
+            document[name] = _dump(getattr(policy, name))  # pyright: ignore[reportAny]
     return document
 
 

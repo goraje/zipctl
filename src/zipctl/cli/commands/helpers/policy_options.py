@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 from dataclasses import replace
 from typing import Protocol
 
@@ -10,7 +11,7 @@ from zipctl.cli.commands.helpers.sources import read_text_source
 from zipctl.cli.context import Context
 from zipctl.cli.errors import UsageError
 from zipctl.cli.output import printable
-from zipctl.zipfile.extract import ExtractPolicy
+from zipctl.zipfile.policy import ExtractPolicy
 from zipctl.zipfile.policy_config import PolicyConfigError, policy_from_json
 
 __all__ = ["PolicyArgs", "add_policy_options", "load_policy"]
@@ -44,14 +45,19 @@ def add_policy_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _parse(text: str, origin: str, base: ExtractPolicy) -> ExtractPolicy:
+def _parse(text: str, origin: str, base: ExtractPolicy, ctx: Context) -> ExtractPolicy:
     try:
-        return policy_from_json(text, base=base)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DeprecationWarning)
+            policy = policy_from_json(text, base=base)
     except PolicyConfigError as exc:
         raise UsageError(
             f"invalid policy ({origin})",
             tuple(printable(str(issue)) for issue in exc.issues),
         ) from None
+    for warning in caught:
+        ctx.warn(f"{origin}: {printable(str(warning.message))}")
+    return policy
 
 
 def load_policy(args: PolicyArgs, ctx: Context) -> ExtractPolicy:
@@ -62,12 +68,14 @@ def load_policy(args: PolicyArgs, ctx: Context) -> ExtractPolicy:
         if default_file == "-":
             raise UsageError(f"{POLICY_ENV_VAR} must name a file, not standard input")
         text = read_text_source(default_file, ctx, "policy file")
-        policy = _parse(text, f"{POLICY_ENV_VAR}={printable(default_file)}", policy)
+        policy = _parse(
+            text, f"{POLICY_ENV_VAR}={printable(default_file)}", policy, ctx
+        )
     if args.policy is not None:
         text = read_text_source(args.policy, ctx, "policy file")
-        policy = _parse(text, f"--policy {printable(args.policy)}", policy)
+        policy = _parse(text, f"--policy {printable(args.policy)}", policy, ctx)
     if args.policy_json is not None:
-        policy = _parse(args.policy_json, "--policy-json", policy)
+        policy = _parse(args.policy_json, "--policy-json", policy, ctx)
     if args.max_ratio is not None:
         policy = replace(policy, max_compression_ratio=_ratio(args.max_ratio))
     return policy

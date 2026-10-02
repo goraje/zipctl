@@ -46,14 +46,14 @@ from zipctl.cli.errors import (
 from zipctl.cli.output import printable
 from zipctl.exceptions import BadPassword, BadZipFile, PasswordError, PasswordRequired
 from zipctl.zipfile.exceptions import ExtractionFailure
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.file import ZipFile
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import (
     ExtractionError,
     ExtractPolicy,
     ExtractResult,
     OverwritePolicy,
 )
-from zipctl.zipfile.file import ZipFile
-from zipctl.zipfile.info import ZipInfo
 
 
 class ExtractArgs(OutputArgs, PasswordArgs, PolicyArgs, ProgressArgs, Protocol):
@@ -70,11 +70,7 @@ class ExtractArgs(OutputArgs, PasswordArgs, PolicyArgs, ProgressArgs, Protocol):
 def _extraction_policy(args: ExtractArgs, ctx: Context) -> ExtractPolicy:
     policy = load_policy(args, ctx)
     if args.overwrite is not None:
-        policy = replace(
-            policy,
-            allow_overwrite=False,
-            overwrite_policy=OverwritePolicy(args.overwrite),
-        )
+        policy = replace(policy, overwrite_policy=OverwritePolicy(args.overwrite))
     if args.no_fsync:
         policy = replace(policy, fsync_files=False)
     if args.dry_run:
@@ -148,7 +144,7 @@ def _run_extraction(
                     destination, members=members, pwd=provider, progress=renderer
                 )
             else:
-                result = zf.extractall(
+                result = zf.safe_extractall(
                     destination,
                     members=members,
                     pwd=provider,
@@ -241,7 +237,8 @@ def register(subparsers: Subparsers) -> None:
     parser.add_argument(
         "--no-policy",
         action="store_true",
-        help="extract with no limits or rules (path traversal is still neutralised)",
+        help="extract like Python's zipfile: no limits or rules, links and special "
+        "files written as regular files (path traversal is still neutralised)",
     )
     parser.add_argument(
         "--dry-run",

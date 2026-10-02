@@ -21,10 +21,10 @@ from zipctl.cli.output import (
     printable,
     write_json,
 )
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.inspection import InspectionResult
+from zipctl.zipfile.policy import (
     ViolationAction,
 )
-from zipctl.zipfile.inspection import InspectionResult
 
 
 class InspectArgs(OutputArgs, PolicyArgs, Protocol):

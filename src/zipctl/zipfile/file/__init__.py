@@ -8,7 +8,7 @@ import warnings
 from collections.abc import Iterable
 from functools import partial
 from types import TracebackType
-from typing import IO, TYPE_CHECKING, Literal, TypeAlias, cast, overload
+from typing import IO, TYPE_CHECKING, Literal, TypeAlias, cast
 
 from typing_extensions import override
 
@@ -37,12 +37,6 @@ from zipctl.zipfile.assessor import (
     assess_archive,
     default_assessment_policy,
 )
-from zipctl.zipfile.extract import (
-    ExtractionError,
-    ExtractMemberResult,
-    ExtractPolicy,
-    ExtractResult,
-)
 from zipctl.zipfile.file.directory import CentralDirectory
 from zipctl.zipfile.file.encryption import (
     INHERIT_ENCRYPTION,
@@ -70,6 +64,12 @@ from zipctl.zipfile.password import (
     MemberPasswordCheck,
     PasswordCheckResult,
     check_member_password,
+)
+from zipctl.zipfile.policy import (
+    ExtractionError,
+    ExtractMemberResult,
+    ExtractPolicy,
+    ExtractResult,
 )
 from zipctl.zipfile.progress import (
     ProgressCallback,
@@ -668,38 +668,19 @@ class ZipFile:
                 extra=extra,
             )
 
-    @overload
     def extract(
         self,
         member: str | ZipInfo,
         path: StrPath | None = None,
         pwd: bytes | PasswordProvider | None = None,
         *,
-        policy: None = None,
         progress: ProgressCallback | None = None,
-    ) -> str: ...
-
-    @overload
-    def extract(
-        self,
-        member: str | ZipInfo,
-        path: StrPath | None = None,
-        pwd: bytes | PasswordProvider | None = None,
-        *,
-        policy: ExtractPolicy,
-        progress: ProgressCallback | None = None,
-    ) -> ExtractMemberResult: ...
-
-    def extract(
-        self,
-        member: str | ZipInfo,
-        path: StrPath | None = None,
-        pwd: bytes | PasswordProvider | None = None,
-        *,
-        policy: ExtractPolicy | None = None,
-        progress: ProgressCallback | None = None,
-    ) -> str | ExtractMemberResult:
+    ) -> str:
         """Extract a single member to *path* on the filesystem.
+
+        Like the standard library's: no limits apply, and symlink and
+        special-file members are written as regular files.  Path traversal is
+        neutralised.  For untrusted archives use :meth:`safe_extract`.
 
         Args:
             member: Archive member filename or
@@ -709,7 +690,6 @@ class ZipFile:
             pwd: Decryption password, or a callable given each encrypted
                 member's :class:`~zipctl.zipfile.info.ZipInfo` that returns
                 its password (or ``None``). ``None`` uses :attr:`pwd`.
-            policy: Opt-in extraction policy; see :class:`ExtractPolicy`.
             progress: Callback receiving a :class:`ProgressEvent` as the
                 member starts, as its data is written, and when it finishes.
                 Raise from it to cancel; the exception propagates unchanged.
@@ -717,51 +697,23 @@ class ZipFile:
         Returns:
             The normalized path of the extracted file or directory.
         """
-        if policy is not None:
-            result = extract_members_with_policy(
-                self, [member], path, pwd, policy, progress
-            )
-            if result.failed_count:
-                raise ExtractionError(result)
-            return result.members[0]
-
         path = os.fspath(os.getcwd() if path is None else path)
         if progress is None:
             return str(extract_member(self, member, path, pwd).target)
         return str(extract_all_with_progress(self, [member], path, pwd, progress)[0])
 
-    @overload
     def extractall(
         self,
         path: StrPath | None = None,
         members: Iterable[str | ZipInfo] | None = None,
         pwd: bytes | PasswordProvider | None = None,
         *,
-        policy: None = None,
         progress: ProgressCallback | None = None,
-    ) -> None: ...
-
-    @overload
-    def extractall(
-        self,
-        path: StrPath | None = None,
-        members: Iterable[str | ZipInfo] | None = None,
-        pwd: bytes | PasswordProvider | None = None,
-        *,
-        policy: ExtractPolicy,
-        progress: ProgressCallback | None = None,
-    ) -> ExtractResult: ...
-
-    def extractall(
-        self,
-        path: StrPath | None = None,
-        members: Iterable[str | ZipInfo] | None = None,
-        pwd: bytes | PasswordProvider | None = None,
-        *,
-        policy: ExtractPolicy | None = None,
-        progress: ProgressCallback | None = None,
-    ) -> None | ExtractResult:
+    ) -> None:
         """Extract all (or a subset of) members to *path* on the filesystem.
+
+        Like the standard library's; see :meth:`extract`.  For untrusted
+        archives use :meth:`safe_extractall`.
 
         Args:
             path: Destination directory. Defaults to the current working
@@ -772,7 +724,6 @@ class ZipFile:
             pwd: Decryption password, or a callable given each encrypted
                 member's :class:`~zipctl.zipfile.info.ZipInfo` that returns
                 its password (or ``None``). ``None`` uses :attr:`pwd`.
-            policy: Opt-in extraction policy; see :class:`ExtractPolicy`.
             progress: Callback receiving a :class:`ProgressEvent` as each
                 member starts, as its data is written, and when it finishes.
                 Raise from it to cancel; members already extracted stay on
@@ -781,23 +732,69 @@ class ZipFile:
                 resolved up front, so an unknown name raises ``KeyError``
                 before anything is written.
         """
-        if members is None:
-            # Entries rather than names, so duplicate names keep their own data.
-            members = list(self.filelist)
-        if policy is not None:
-            result = extract_members_with_policy(
-                self, list(members), path, pwd, policy, progress
-            )
-            if result.failed_count:
-                raise ExtractionError(result)
-            return result
+        # Entries rather than names, so duplicate names keep their own data.
+        members = list(self.filelist) if members is None else members
         path = os.fspath(os.getcwd() if path is None else path)
         if progress is not None:
             extract_all_with_progress(self, list(members), path, pwd, progress)
-            return None
+            return
         for zipinfo in members:
             extract_member(self, zipinfo, path, pwd)
-        return None
+
+    def safe_extract(
+        self,
+        member: str | ZipInfo,
+        path: StrPath | None = None,
+        pwd: bytes | PasswordProvider | None = None,
+        *,
+        policy: ExtractPolicy | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> ExtractMemberResult:
+        """Extract one member under an extraction policy; see :meth:`safe_extractall`.
+
+        Raises:
+            ExtractionError: If the member fails; ``.result`` says why.
+        """
+        return self.safe_extractall(
+            path, [member], pwd, policy=policy, progress=progress
+        ).members[0]
+
+    def safe_extractall(
+        self,
+        path: StrPath | None = None,
+        members: Iterable[str | ZipInfo] | None = None,
+        pwd: bytes | PasswordProvider | None = None,
+        *,
+        policy: ExtractPolicy | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> ExtractResult:
+        """Extract members under *policy* and report on every one of them.
+
+        Each member is assessed against *policy* (by default
+        ``ExtractPolicy()``: no traversal, symlinks, special files or
+        overwrites, and finite size, count and ratio limits) before anything
+        is written, and its outcome is recorded in the result.
+
+        Args:
+            path, members, pwd, progress: As for :meth:`extractall`.
+            policy: The rules and limits; see :class:`ExtractPolicy`.
+
+        Returns:
+            The structured :class:`ExtractResult`.
+
+        Raises:
+            ExtractionError: If any member failed; ``.result`` holds the
+                partial result.
+        """
+        selected: list[str | ZipInfo] = list(
+            self.filelist if members is None else members
+        )
+        result = extract_members_with_policy(
+            self, selected, path, pwd, policy or ExtractPolicy(), progress
+        )
+        if result.failed_count:
+            raise ExtractionError(result)
+        return result
 
     def write(
         self,

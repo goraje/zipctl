@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 import zipctl
-from zipctl.zipfile.extract import ExtractionError
 from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import ExtractionError
 
 
 def test_policy_error_exposes_partial_result(tmp_path: Path) -> None:
@@ -20,7 +20,7 @@ def test_policy_error_exposes_partial_result(tmp_path: Path) -> None:
 
     with zipctl.ZipFile(archive) as zf:
         with pytest.raises(ExtractionError) as raised:
-            zf.extractall(
+            zf.safe_extractall(
                 tmp_path / "out",
                 policy=zipctl.ExtractPolicy(max_compression_ratio=None),
             )
@@ -38,7 +38,7 @@ def test_policy_rename_does_not_overwrite_existing_target(tmp_path: Path) -> Non
         zf.writestr("file.txt", b"new")
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             output,
             policy=zipctl.ExtractPolicy(
                 max_compression_ratio=None,
@@ -58,7 +58,7 @@ def test_policy_enforces_member_quota_before_writing(tmp_path: Path) -> None:
         zf.writestr("large.bin", b"x" * 32)
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             output,
             policy=zipctl.ExtractPolicy(
                 max_member_size=16,
@@ -80,7 +80,7 @@ def test_policy_enforces_total_quota_across_members(tmp_path: Path) -> None:
         zf.writestr("two.bin", b"2" * 8)
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             output,
             policy=zipctl.ExtractPolicy(
                 max_member_size=None,
@@ -112,7 +112,7 @@ def test_policy_aborts_and_removes_partial_output_on_runtime_quota(
     with zipctl.ZipFile(archive) as zf:
         monkeypatch.setattr(zf, "open", oversized_open)
         with pytest.raises(ExtractionError) as raised:
-            zf.extractall(
+            zf.safe_extractall(
                 output,
                 policy=zipctl.ExtractPolicy(
                     max_member_size=16,
@@ -135,7 +135,7 @@ def test_policy_extracts_mixed_archive_with_member_results(tmp_path: Path) -> No
         zf.writestr("../outside.txt", b"blocked")
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             destination,
             policy=zipctl.ExtractPolicy(
                 max_compression_ratio=None,
@@ -163,7 +163,7 @@ def test_policy_preview_is_a_real_dry_run(tmp_path: Path) -> None:
         zf.writestr("file.txt", b"payload")
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             destination,
             policy=zipctl.ExtractPolicy(
                 max_compression_ratio=None,
@@ -191,7 +191,7 @@ def test_error_quota_preserves_existing_file(tmp_path: Path) -> None:
 
     with zipctl.ZipFile(archive) as zf:
         with pytest.raises(zipctl.ExtractionError):
-            zf.extractall(
+            zf.safe_extractall(
                 destination,
                 policy=zipctl.ExtractPolicy(
                     max_total_uncompressed_size=5,
@@ -212,7 +212,7 @@ def test_allowed_symlink_is_materialized_without_following_it(tmp_path: Path) ->
         zf.writestr(info, b"target.txt")
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             destination,
             policy=zipctl.ExtractPolicy(
                 allow_symlinks=True,
@@ -233,7 +233,7 @@ def test_warn_still_rejects_path_escape(tmp_path: Path) -> None:
 
     with zipctl.ZipFile(archive) as zf:
         with pytest.raises(zipctl.ExtractionError):
-            zf.extractall(
+            zf.safe_extractall(
                 tmp_path / "out",
                 policy=zipctl.ExtractPolicy(
                     on_violation=zipctl.ViolationAction.WARN,
@@ -254,7 +254,7 @@ def test_existing_symlink_directory_is_not_followed(tmp_path: Path) -> None:
 
     with zipctl.ZipFile(archive) as zf:
         with pytest.raises(zipctl.ExtractionError):
-            zf.extractall(
+            zf.safe_extractall(
                 destination,
                 policy=zipctl.ExtractPolicy(max_compression_ratio=None),
             )
@@ -271,7 +271,7 @@ def test_extract_policy_rule_overrides_default_violation_action(tmp_path: Path) 
 
     with zipctl.ZipFile(archive) as zf:
         with pytest.raises(zipctl.ExtractionError) as excinfo:
-            zf.extractall(
+            zf.safe_extractall(
                 tmp_path / "out",
                 policy=zipctl.ExtractPolicy(
                     max_compression_ratio=None,
@@ -344,7 +344,7 @@ def test_extract_policy_marks_overwritten_members(tmp_path: Path) -> None:
         zf.writestr("new.txt", b"new")
 
     with zipctl.ZipFile(archive) as zf:
-        result = zf.extractall(
+        result = zf.safe_extractall(
             destination,
             policy=zipctl.ExtractPolicy(
                 max_compression_ratio=None,
@@ -403,7 +403,7 @@ def test_fsync_files_policy_controls_fsync(
     monkeypatch.setattr(os, "fsync", recording_fsync)
 
     with zipctl.ZipFile(archive) as zf:
-        zf.extractall(
+        zf.safe_extractall(
             tmp_path / "out", policy=zipctl.ExtractPolicy(fsync_files=fsync_files)
         )
 
@@ -427,7 +427,7 @@ def test_max_entries_error_extracts_nothing_and_reports_once(tmp_path: Path) -> 
     policy = zipctl.ExtractPolicy(max_entries=3)
     with zipctl.ZipFile(_five_entry_archive()) as zf:
         with pytest.raises(zipctl.ExtractionError) as excinfo:
-            zf.extractall(tmp_path / "out", policy=policy)
+            zf.safe_extractall(tmp_path / "out", policy=policy)
 
     result = excinfo.value.result
     assert not (tmp_path / "out").exists() or not list((tmp_path / "out").iterdir())
@@ -441,7 +441,7 @@ def test_max_entries_skip_extracts_only_the_first_entries(tmp_path: Path) -> Non
         max_entries=3, on_violation=zipctl.ViolationAction.SKIP
     )
     with zipctl.ZipFile(_five_entry_archive()) as zf:
-        result = zf.extractall(tmp_path, policy=policy)
+        result = zf.safe_extractall(tmp_path, policy=policy)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["f0.txt", "f1.txt", "f2.txt"]
     assert (result.extracted_count, result.skipped_count) == (3, 2)
@@ -454,7 +454,7 @@ def test_max_entries_warn_extracts_everything_with_one_warning(tmp_path: Path) -
     )
     with zipctl.ZipFile(_five_entry_archive()) as zf:
         with pytest.warns(UserWarning, match="limit is 3") as caught:
-            result = zf.extractall(tmp_path, policy=policy)
+            result = zf.safe_extractall(tmp_path, policy=policy)
 
     assert len(caught) == 1
     assert result.extracted_count == 5
@@ -528,7 +528,7 @@ def test_custom_validator_chain_can_skip_members(tmp_path: Path) -> None:
         on_violation=zipctl.ViolationAction.SKIP,
     )
     with zipctl.ZipFile(_custom_archive()) as zf:
-        result = zf.extractall(tmp_path, policy=policy)
+        result = zf.safe_extractall(tmp_path, policy=policy)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["ok.txt"]
     assert (result.extracted_count, result.skipped_count) == (1, 2)
 
@@ -552,5 +552,5 @@ def test_policy_extractall_extracts_the_first_of_duplicate_entries(
             zf.writestr("same.txt", b"first")
             zf.writestr("same.txt", b"second")
     with zipctl.ZipFile(path) as zf, pytest.raises(zipctl.ExtractionError):
-        zf.extractall(tmp_path / "out", policy=zipctl.ExtractPolicy())
+        zf.safe_extractall(tmp_path / "out", policy=zipctl.ExtractPolicy())
     assert (tmp_path / "out" / "same.txt").read_bytes() == b"first"

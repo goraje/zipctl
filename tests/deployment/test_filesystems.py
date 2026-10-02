@@ -21,10 +21,10 @@ def test_case_insensitive_collision_preserves_original(tmp_path: Path) -> None:
         pytest.skip("filesystem is case-sensitive")
     with ZipFile(io.BytesIO(archive_bytes())) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(tmp_path, policy=ExtractPolicy())
+            archive.safe_extractall(tmp_path, policy=ExtractPolicy())
     assert existing.read_bytes() == b"original"
     with ZipFile(io.BytesIO(archive_bytes())) as archive:
-        result = archive.extractall(
+        result = archive.safe_extractall(
             tmp_path, policy=ExtractPolicy(overwrite_policy=OverwritePolicy.RENAME)
         )
     assert result.failed_count == 0
@@ -71,15 +71,15 @@ def test_real_filesystem_without_hardlinks() -> None:
         destination = root / "output"
         destination.mkdir()
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
-            result = archive.extractall(destination, policy=ExtractPolicy())
+            result = archive.safe_extractall(destination, policy=ExtractPolicy())
         assert result.failed_count == 0
         assert (destination / "file.txt").read_bytes() == b"payload"
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
             with pytest.raises(ExtractionError):  # still no-clobber
-                archive.extractall(destination, policy=ExtractPolicy())
+                archive.safe_extractall(destination, policy=ExtractPolicy())
         assert original.read_bytes() == b"original"
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
-            result = archive.extractall(
+            result = archive.safe_extractall(
                 destination,
                 policy=ExtractPolicy(overwrite_policy=OverwritePolicy.REPLACE),
             )
@@ -96,7 +96,7 @@ def test_extraction_without_hard_links(
     monkeypatch.setattr(os, "link", refuse)
     for _ in range(2):
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
-            result = archive.extractall(
+            result = archive.safe_extractall(
                 tmp_path, policy=ExtractPolicy(overwrite_policy=OverwritePolicy.RENAME)
             )
         assert result.failed_count == 0

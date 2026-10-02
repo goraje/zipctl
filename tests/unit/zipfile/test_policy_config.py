@@ -65,7 +65,6 @@ FULL_POLICY = ExtractPolicy(
     allow_windows_drive_paths=ExtractPolicyRule(True),
     allow_symlinks=True,
     allow_special_files=ExtractPolicyRule(False, ViolationAction.WARN),
-    allow_overwrite=True,
     overwrite_policy=OverwritePolicy.RENAME,
     max_member_size=ExtractPolicyRule(1024, ViolationAction.SKIP),
     max_total_uncompressed_size=None,
@@ -127,7 +126,6 @@ def test_policy_with_custom_validator_cannot_be_dumped() -> None:
     ("field", "value", "expected"),
     [
         ("allow_symlinks", True, True),
-        ("allow_overwrite", True, True),
         ("preview_only", True, True),
         ("fsync_files", False, False),
         ("max_entries", 0, 0),
@@ -151,6 +149,14 @@ def test_valid_values_are_accepted(field: str, value: object, expected: object) 
     actual = cast("object", getattr(policy, field))
     assert actual == expected
     assert type(actual) is type(expected)
+
+
+def test_allow_overwrite_is_deprecated_and_means_replace() -> None:
+    with pytest.warns(DeprecationWarning, match="overwrite_policy"):
+        policy = policy_from_mapping({"allow_overwrite": True})
+    assert policy.overwrite_policy == OverwritePolicy.REPLACE
+    assert not policy.allow_overwrite
+    assert "allow_overwrite" not in policy_to_mapping(policy)
 
 
 @pytest.mark.parametrize(
@@ -472,7 +478,7 @@ def test_loaded_policy_enforces_rules_during_extraction(tmp_path: Path) -> None:
     )
     files = {"ok.txt": b"fine", "tool.EXE": b"x", "big.txt": b"y" * 50}
     with zipctl.ZipFile(_archive(files)) as zf:
-        result = zf.extractall(tmp_path, policy=policy)
+        result = zf.safe_extractall(tmp_path, policy=policy)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["ok.txt"]
     assert (result.extracted_count, result.skipped_count) == (1, 2)
@@ -483,7 +489,7 @@ def test_loaded_and_hand_built_policies_are_interchangeable(tmp_path: Path) -> N
     loaded = policy_from_json('{"max_entries": 1, "on_violation": "skip"}')
     assert loaded == built
     with zipctl.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
-        result = zf.extractall(tmp_path, policy=loaded)
+        result = zf.safe_extractall(tmp_path, policy=loaded)
     assert (result.extracted_count, result.skipped_count) == (1, 1)
 
 

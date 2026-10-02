@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from zipctl.zipfile.extract import ExtractPolicy, ExtractViolation, MemberAssessment
+from zipctl.zipfile.policy import ExtractPolicy, ExtractViolation, MemberAssessment
 
 
 @dataclass(frozen=True)

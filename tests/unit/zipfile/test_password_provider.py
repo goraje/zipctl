@@ -74,7 +74,7 @@ def test_extract_a_single_member_with_a_provider(
 def test_policy_extraction_uses_the_provider(archive: bytes, tmp_path: Path) -> None:
     provider = Provider()
     with ZipFile(io.BytesIO(archive)) as zf:
-        result = zf.extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
+        result = zf.safe_extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
     assert result.extracted_count == 3
     assert provider.asked == ["alpha.txt", "beta.txt"]
 
@@ -106,7 +106,7 @@ def test_a_missing_password_fails_only_that_member_under_a_policy(
     provider = Provider({"alpha.txt": PASSWORDS["alpha.txt"]})
     with ZipFile(io.BytesIO(archive)) as zf:
         with pytest.raises(zipctl.ExtractionError) as excinfo:
-            zf.extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
+            zf.safe_extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
     statuses = {m.member: m.status for m in excinfo.value.result.members}
     assert statuses == {
         "alpha.txt": MemberStatus.EXTRACTED,
@@ -131,7 +131,7 @@ def test_a_provider_can_raise_its_own_password_error(
 
     with ZipFile(io.BytesIO(archive)) as zf:
         with pytest.raises(zipctl.ExtractionError) as excinfo:
-            zf.extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
+            zf.safe_extractall(tmp_path, pwd=provider, policy=ExtractPolicy())
     messages = {
         m.member: m.violations[0].message
         for m in excinfo.value.result.members

@@ -219,17 +219,22 @@ An entry-level password overrides the archive default password. Per-entry
 encryption is part of the ZIP format, but consumers vary in their support for
 mixed algorithms or multiple passwords in one archive.
 
-### Opt-in extraction policy
+### Safe extraction with a policy
 
-The legacy `extract()` and `extractall()` behavior remains unchanged when no
-policy is supplied. For untrusted archives, pass an `ExtractPolicy`; policy
-enabled calls return structured results describing every member.
+`extract()` and `extractall()` behave like the standard library's: no limits
+apply, and symlink and special-file members (FIFOs, devices) are written as
+regular files holding their payload. Path traversal is still neutralised.
+
+For untrusted archives use `safe_extract()` / `safe_extractall()`. They check
+every member against an `ExtractPolicy` (by default `ExtractPolicy()`: no
+traversal, symlinks, special files or overwrites, finite size, count and ratio
+limits) and return structured results describing every member.
 
 ```python
 from zipctl import ExtractPolicy, ViolationAction
 
 with ZipFile("input.zip") as zf:
-    result = zf.extractall(
+    result = zf.safe_extractall(
         "out",
         policy=ExtractPolicy(
             on_violation=ViolationAction.SKIP,
@@ -253,9 +258,9 @@ and `SKIP` rules enforce runtime quotas with their respective actions.
 
 ### Progress reporting
 
-`extract()` and `extractall()` accept `progress=`, a callable that receives a
+All four extraction methods accept `progress=`, a callable that receives a
 frozen `ProgressEvent` as each member starts, roughly every MiB while its data
-is written, and when it finishes. It works with and without a policy:
+is written, and when it finishes:
 
 ```python
 def show(event: ProgressEvent) -> None:
@@ -264,7 +269,7 @@ def show(event: ProgressEvent) -> None:
               f"({event.total_bytes_done}/{event.total_bytes} bytes)")
 
 with ZipFile("input.zip") as zf:
-    zf.extractall("out", policy=ExtractPolicy(), progress=show)
+    zf.safe_extractall("out", progress=show)
 ```
 
 Sizes come from the archive's declared metadata, so treat them as hints. The
@@ -277,7 +282,7 @@ before anything is written.
 
 ### Per-member passwords on extraction
 
-`pwd=` of `extract()` / `extractall()` may also be a callable taking a
+`pwd=` of every extraction method may also be a callable taking a
 `ZipInfo` and returning that member's password (or `None`). It is asked only
 for encrypted members, which suits archives protected per entry:
 
@@ -297,7 +302,7 @@ names; `policy_to_json(ExtractPolicy())` prints a complete starting document.
 ```python
 policy = zipctl.policy_from_json(Path("rules.json").read_text())
 with ZipFile("input.zip") as zf:
-    zf.extractall("out", policy=policy)
+    zf.safe_extractall("out", policy=policy)
 ```
 
 ```json
@@ -481,9 +486,10 @@ zipctl policy validate FILE [FILE ...] [--json]
   options, `--overwrite {error,skip,replace,rename}` (default `error`: existing
   files are never touched), `--dry-run` (report what would happen, write
   nothing, do not create `DIR`), `--no-fsync`, `--progress`, and `-q` / `-v`.
-  `--no-policy` uses plain extraction (path traversal is still neutralised, but
-  no limits apply) and cannot be combined with the options that configure the
-  policy.
+  `--no-policy` uses plain extraction like the standard library's (path
+  traversal is still neutralised, but no limits apply and symlinks and special
+  files are written as regular files) and cannot be combined with the options
+  that configure the policy.
 - `check-password` answers "is this the password?" without extracting. It
   takes one password (from a file, standard input, `ZIPCTL_PASSWORD` or a single
   prompt, never as an argument) and tests it against every encrypted member, or
@@ -655,7 +661,8 @@ are accepted when their explicit directory entry appears later; pre-existing
 targets remain subject to the overwrite policy. Rename mode inserts a counter
 before the suffix chain (`file.1.tar.gz`) and checks the candidate against extension
 and custom validation rules. Explicit CLI `--overwrite` overrides a loaded
-`allow_overwrite` setting.
+`overwrite_policy`. The older `allow_overwrite: true` is still accepted, with a
+`DeprecationWarning`, and means `overwrite_policy: "replace"`.
 
 Direct `ExtractPolicy(...)` construction validates limits, actions and extensions
 just like JSON loading. Extension rules are normalized to lowercase.

@@ -36,6 +36,7 @@ def test_explicit_overwrite_beats_loaded_legacy_setting(
     )
     assert result.returncode == 1
     assert (destination / "file.txt").read_bytes() == b"original"
+    assert "allow_overwrite is deprecated" in result.stderr
 
 
 def test_test_continues_after_unsupported_encrypted_member(

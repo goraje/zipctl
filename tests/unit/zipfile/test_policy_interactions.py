@@ -26,7 +26,7 @@ def test_directory_after_child_preserves_archive_order(tmp_path: Path) -> None:
         archive.writestr("dir/file", b"payload")
         archive.mkdir("dir")
     with ZipFile(buffer) as archive:
-        result = archive.extractall(tmp_path, policy=ExtractPolicy())
+        result = archive.safe_extractall(tmp_path, policy=ExtractPolicy())
     assert result.failed_count == 0
     assert [member.member for member in result.members] == ["dir/file", "dir/"]
     assert (tmp_path / "dir/file").read_bytes() == b"payload"
@@ -49,7 +49,7 @@ def test_rename_preserves_extensions_and_rechecks_custom_rules(tmp_path: Path) -
     )
     with ZipFile(io.BytesIO(archive_bytes())) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(tmp_path, policy=policy)
+            archive.safe_extractall(tmp_path, policy=policy)
     assert visited == ["file.txt", "file.1.txt"]
     assert target.read_bytes() == b"original"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["file.txt"]
@@ -79,7 +79,7 @@ def test_filesystem_without_hardlinks_still_never_clobbers(
     (tmp_path / "file.txt").write_bytes(b"original")
     with ZipFile(io.BytesIO(archive_bytes())) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(tmp_path, policy=ExtractPolicy())
+            archive.safe_extractall(tmp_path, policy=ExtractPolicy())
     assert [p.name for p in tmp_path.iterdir()] == ["file.txt"]
     assert (tmp_path / "file.txt").read_bytes() == b"original"
 

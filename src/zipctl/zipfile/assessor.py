@@ -12,7 +12,8 @@ from zipctl.zipfile.assessment import (
     ExtractionContext,
     ValidationState,
 )
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import (
     ExtractPolicy,
     ExtractViolation,
     MemberAssessment,
@@ -21,7 +22,6 @@ from zipctl.zipfile.extract import (
     normalized_destination,
     resolve_rule,
 )
-from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.validators import (
     EXTRACT_VALIDATORS,
     ValidatorParams,
@@ -58,7 +58,6 @@ def default_assessment_policy() -> ExtractPolicy:
     """Policy used when the caller supplies none: report, never enforce limits."""
     return replace(
         ExtractPolicy(),
-        allow_overwrite=True,
         overwrite_policy=OverwritePolicy.REPLACE,
         max_member_size=None,
         max_total_uncompressed_size=None,

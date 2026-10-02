@@ -7,18 +7,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Protocol, TypeAlias
 
-from zipctl.zipfile.extract import (
-    ExtractPolicy,
-    ExtractResult,
-    MemberStatus,
-    OverwritePolicy,
-    normalized_destination,
-)
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.materialize import (
     ExtractionQuota,
     MaterializationResult,
     materialize_member,
+)
+from zipctl.zipfile.policy import (
+    ExtractPolicy,
+    ExtractResult,
+    MemberStatus,
+    OverwritePolicy,
+    normalized_destination,
 )
 from zipctl.zipfile.policy_extraction import extract_with_policy
 from zipctl.zipfile.progress import (
@@ -114,11 +114,7 @@ def extract_members_with_policy(
                 target_override=target,
                 quota=quota,
                 fsync=policy.fsync_files,
-                overwrite=(
-                    OverwritePolicy.REPLACE
-                    if policy.allow_overwrite
-                    else policy.overwrite_policy
-                ),
+                overwrite=policy.overwrite_policy,
                 reporter=reporter,
                 plain=False,
             ),

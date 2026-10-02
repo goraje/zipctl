@@ -81,7 +81,22 @@ use staging and successful atomic publication when that guarantee is needed.
 
 ## Extraction and publication
 
-Extraction follows archive order. A later explicit directory entry can refer to
+Extraction follows archive order.
+
+`extract()` and `extractall()` follow the standard library: no limits, and
+symlink and special-file members become regular files. `safe_extract()` and
+`safe_extractall()` apply an `ExtractPolicy` (default `ExtractPolicy()`) and
+return structured results. Extracted files are created with mode `0o666`
+masked by the process umask.
+
+Migration (pre-1.0): `extract(..., policy=P)` and `extractall(..., policy=P)`
+became `safe_extract(..., policy=P)` and `safe_extractall(..., policy=P)`.
+`ExtractPolicy.allow_overwrite` is deprecated: it warns and is folded into
+`overwrite_policy=OverwritePolicy.REPLACE`, and policy documents no longer
+contain it. Empty encryption passwords raise `ValueError` for both methods
+(WZ-AES used to raise `RuntimeError`). Policy extraction no longer turns
+`ValueError` or `RuntimeError` from a member into a FAILED result; a missing
+codec backend propagates like an unsupported method. A later explicit directory entry can refer to
 a directory created for an earlier child. Rename candidates preserve suffix
 chains and are rechecked against extension and custom rules.
 

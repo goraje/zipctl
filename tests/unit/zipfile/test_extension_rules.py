@@ -228,7 +228,7 @@ def test_compound_extension_rule_from_json_drives_real_extraction(
         zf.writestr("drop.tar.gz", b"2")
         zf.writestr("keep.txt", b"3")
     with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
-        result = zf.extractall(tmp_path, policy=policy)
+        result = zf.safe_extractall(tmp_path, policy=policy)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.gz", "keep.txt"]
     assert (result.extracted_count, result.skipped_count) == (2, 1)

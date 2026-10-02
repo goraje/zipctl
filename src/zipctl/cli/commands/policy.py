@@ -16,7 +16,7 @@ from zipctl.cli.commands.helpers.sources import read_text_source
 from zipctl.cli.context import Context
 from zipctl.cli.errors import EXIT_OK, EXIT_USAGE, CliError, UsageError
 from zipctl.cli.output import count, printable, write_json
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.policy import (
     ExtractPolicy,
 )
 from zipctl.zipfile.policy_config import (

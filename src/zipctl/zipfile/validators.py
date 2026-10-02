@@ -13,14 +13,14 @@ from typing import Protocol
 
 from zipctl.exceptions import BadZipFile
 from zipctl.zipfile.assessment import ExtractionContext, ValidationState
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.policy import (
     ExtractViolation,
     OverwritePolicy,
     ViolationAction,
     compression_ratio,
     resolve_rule,
 )
-from zipctl.zipfile.info import ZipInfo
 
 _WINDOWS_ILLEGAL_NAME_CHARS = ':<>|"?*' + "".join(chr(i) for i in range(32))
 _WINDOWS_ILLEGAL_NAME_TABLE = str.maketrans(
@@ -215,7 +215,6 @@ def check_overwrite_conflict(params: ValidatorParams) -> Iterable[ExtractViolati
     if (
         os.path.lexists(target)
         and not (info.is_dir() and target.resolve() in params.state.created_directories)
-        and not policy.allow_overwrite
         and policy.overwrite_policy
         not in (OverwritePolicy.REPLACE, OverwritePolicy.RENAME)
     ):

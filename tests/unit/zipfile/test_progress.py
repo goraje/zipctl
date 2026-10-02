@@ -101,7 +101,7 @@ def test_symlinks_and_directories_have_no_byte_progress(
         zf.writestr(link, b"target.txt")
     events: list[ProgressEvent] = []
     with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
-        zf.extractall(
+        zf.safe_extractall(
             tmp_path,
             progress=events.append,
             policy=zipctl.ExtractPolicy(allow_symlinks=True),
@@ -118,7 +118,7 @@ def test_progress_none_installs_no_wrapper(
     monkeypatch.setattr(materialize, "_ProgressWriter", forbidden)
     with zipctl.ZipFile(_archive({"a.txt": b"abc"})) as zf:
         zf.extractall(tmp_path)
-        zf.extractall(tmp_path / "policy", policy=zipctl.ExtractPolicy())
+        zf.safe_extractall(tmp_path / "policy", policy=zipctl.ExtractPolicy())
     assert (tmp_path / "policy" / "a.txt").read_bytes() == b"abc"
 
 
@@ -139,7 +139,7 @@ def test_policy_finish_carries_each_member_status(tmp_path: Path) -> None:
     files = {"ok.txt": b"fine", "../escape.txt": b"nope", "also.txt": b"fine"}
     policy = zipctl.ExtractPolicy(on_violation=zipctl.ViolationAction.SKIP)
     with zipctl.ZipFile(_archive(files)) as zf:
-        zf.extractall(tmp_path / "out", policy=policy, progress=events.append)
+        zf.safe_extractall(tmp_path / "out", policy=policy, progress=events.append)
 
     finishes = [e for e in events if e.phase == FINISH]
     assert [e.status for e in finishes] == [
@@ -154,14 +154,14 @@ def test_policy_failed_and_previewed_statuses(tmp_path: Path) -> None:
     failed: list[ProgressEvent] = []
     with zipctl.ZipFile(_archive({"../escape.txt": b"nope"})) as zf:
         with pytest.raises(zipctl.ExtractionError):
-            zf.extractall(
+            zf.safe_extractall(
                 tmp_path / "a", policy=zipctl.ExtractPolicy(), progress=failed.append
             )
     assert failed[-1].status == MemberStatus.FAILED
 
     previewed: list[ProgressEvent] = []
     with zipctl.ZipFile(_archive({"a.txt": b"abc"})) as zf:
-        zf.extractall(
+        zf.safe_extractall(
             tmp_path / "b",
             policy=zipctl.ExtractPolicy(preview_only=True),
             progress=previewed.append,
@@ -176,7 +176,7 @@ def test_entry_limit_skip_reports_skipped_members(tmp_path: Path) -> None:
         max_entries=1, on_violation=zipctl.ViolationAction.SKIP
     )
     with zipctl.ZipFile(_archive({"a": b"1", "b": b"2", "c": b"3"})) as zf:
-        zf.extractall(tmp_path, policy=policy, progress=events.append)
+        zf.safe_extractall(tmp_path, policy=policy, progress=events.append)
     finishes = [e for e in events if e.phase == FINISH]
     assert [e.status for e in finishes] == [
         MemberStatus.EXTRACTED,
@@ -189,7 +189,7 @@ def test_archive_rejected_by_entry_limit_emits_no_events(tmp_path: Path) -> None
     events: list[ProgressEvent] = []
     with zipctl.ZipFile(_archive({"a": b"1", "b": b"2"})) as zf:
         with pytest.raises(zipctl.ExtractionError):
-            zf.extractall(
+            zf.safe_extractall(
                 tmp_path,
                 policy=zipctl.ExtractPolicy(max_entries=1),
                 progress=events.append,
@@ -221,7 +221,7 @@ def test_callback_can_cancel_between_members(tmp_path: Path, use_policy: bool) -
     policy = zipctl.ExtractPolicy() if use_policy else None
     with zipctl.ZipFile(_archive({"first.txt": b"1", "second.txt": b"2"})) as zf:
         with pytest.raises(Cancelled) as excinfo:
-            zf.extractall(tmp_path, policy=policy, progress=callback)
+            zf.safe_extractall(tmp_path, policy=policy, progress=callback)
     assert excinfo.value is error
     assert (tmp_path / "first.txt").exists()
     assert not (tmp_path / "second.txt").exists()
@@ -239,7 +239,7 @@ def test_callback_error_during_byte_progress_cancels_cleanly(
     files = {"first.txt": b"1", "big.bin": b"z" * BIG}
     with zipctl.ZipFile(_archive(files)) as zf:
         with pytest.raises(type(error)) as excinfo:
-            zf.extractall(tmp_path, policy=policy, progress=callback)
+            zf.safe_extractall(tmp_path, policy=policy, progress=callback)
     assert excinfo.value is error
     assert (tmp_path / "first.txt").exists()
     assert not (tmp_path / "big.bin").exists()

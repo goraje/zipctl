@@ -16,7 +16,7 @@ from zipctl.cli.commands.helpers.progress import (
     StepReporter,
     progress_renderer,
 )
-from zipctl.zipfile.extract import MemberStatus
+from zipctl.zipfile.policy import MemberStatus
 from zipctl.zipfile.progress import ProgressEvent, ProgressPhase
 
 HAS_PTY = sys.platform != "win32"

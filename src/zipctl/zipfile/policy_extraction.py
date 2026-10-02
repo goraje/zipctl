@@ -10,7 +10,9 @@ from zipctl.exceptions import BadZipFile, PasswordError
 from zipctl.zipfile.assessment import ExtractionContext, ValidationState
 from zipctl.zipfile.assessor import assess_member, entry_count_violation
 from zipctl.zipfile.exceptions import ExtractionFailure, ExtractionQuotaExceeded
-from zipctl.zipfile.extract import (
+from zipctl.zipfile.info import ZipInfo
+from zipctl.zipfile.materialize import ExtractionQuota, MaterializationResult
+from zipctl.zipfile.policy import (
     ExtractMemberResult,
     ExtractPolicy,
     ExtractResult,
@@ -21,8 +23,6 @@ from zipctl.zipfile.extract import (
     compression_ratio,
     resolve_rule,
 )
-from zipctl.zipfile.info import ZipInfo
-from zipctl.zipfile.materialize import ExtractionQuota, MaterializationResult
 from zipctl.zipfile.progress import ProgressReporter
 from zipctl.zipfile.validators import (
     ValidatorParams,

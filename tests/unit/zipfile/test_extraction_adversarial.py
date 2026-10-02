@@ -46,10 +46,10 @@ def test_unicode_path_and_extension_policy_agree(
         policy = ExtractPolicy(blocked_extensions=frozenset({".exe"}))
         if effective.endswith(".exe"):
             with pytest.raises(ExtractionError):
-                archive.extractall(tmp_path, policy=policy)
+                archive.safe_extractall(tmp_path, policy=policy)
             assert not list(tmp_path.iterdir())
         else:
-            archive.extractall(tmp_path, policy=policy)
+            archive.safe_extractall(tmp_path, policy=policy)
             assert [path.name for path in tmp_path.iterdir()] == [effective]
 
 
@@ -73,9 +73,9 @@ def test_overwrite_policy_handles_file_created_during_extraction(
     with ZipFile(io.BytesIO(_archive(ZipInfo("file.txt")))) as archive:
         if overwrite == OverwritePolicy.ERROR:
             with pytest.raises(ExtractionError):
-                archive.extractall(tmp_path, policy=policy)
+                archive.safe_extractall(tmp_path, policy=policy)
         else:
-            result = archive.extractall(tmp_path, policy=policy)
+            result = archive.safe_extractall(tmp_path, policy=policy)
             if overwrite == OverwritePolicy.SKIP:
                 assert result.skipped_count == 1
             elif overwrite == OverwritePolicy.RENAME:
@@ -99,7 +99,7 @@ def test_symlink_target_cannot_escape_through_existing_link(tmp_path: Path) -> N
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     with ZipFile(io.BytesIO(_archive(info, b"bridge/secret"))) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(root, policy=ExtractPolicy(allow_symlinks=True))
+            archive.safe_extractall(root, policy=ExtractPolicy(allow_symlinks=True))
     assert not (root / "link").is_symlink()
 
 
@@ -114,7 +114,7 @@ def test_warn_size_limit_really_allows_extraction(tmp_path: Path, limit: str) ->
     )
     with ZipFile(io.BytesIO(_archive(ZipInfo("file.txt")))) as archive:
         with pytest.warns(UserWarning, match="exceeds"):
-            result = archive.extractall(tmp_path, policy=policy)
+            result = archive.safe_extractall(tmp_path, policy=policy)
     assert result.extracted_count == 1
     assert result.failed_count == 0
 
@@ -130,7 +130,7 @@ def test_corrupt_deflate_is_recorded_and_next_member_is_extracted(
     data[33] = 7  # reserved DEFLATE block type
     with ZipFile(io.BytesIO(data)) as archive:
         with pytest.raises(ExtractionError) as caught:
-            archive.extractall(tmp_path, policy=ExtractPolicy())
+            archive.safe_extractall(tmp_path, policy=ExtractPolicy())
     assert caught.value.result.failed_count == 1
     assert caught.value.result.extracted_count == 1
     assert (tmp_path / "good").read_bytes() == b"survives"
@@ -150,7 +150,7 @@ def test_invalid_symlink_preserves_existing_file(
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     with ZipFile(io.BytesIO(_archive(info, payload))) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(
+            archive.safe_extractall(
                 tmp_path,
                 policy=ExtractPolicy(
                     allow_symlinks=True, overwrite_policy=OverwritePolicy.REPLACE
@@ -166,14 +166,14 @@ def test_dangling_symlink_counts_as_existing_target(tmp_path: Path) -> None:
     target.symlink_to("missing")
     with ZipFile(io.BytesIO(_archive(ZipInfo("file.txt")))) as archive:
         with pytest.raises(ExtractionError):
-            archive.extractall(tmp_path, policy=ExtractPolicy())
+            archive.safe_extractall(tmp_path, policy=ExtractPolicy())
     assert target.is_symlink()
     assert not (tmp_path / "missing").exists()
 
 
 def test_extension_allowlist_does_not_reject_directories(tmp_path: Path) -> None:
     with ZipFile(io.BytesIO(_archive(ZipInfo("docs/"), b""))) as archive:
-        result = archive.extractall(
+        result = archive.safe_extractall(
             tmp_path, policy=ExtractPolicy(allowed_extensions=frozenset({".txt"}))
         )
     assert result.extracted_count == 1
@@ -183,7 +183,7 @@ def test_extension_allowlist_does_not_reject_directories(tmp_path: Path) -> None
 def test_rename_file_around_existing_directory(tmp_path: Path) -> None:
     (tmp_path / "file.txt").mkdir()
     with ZipFile(io.BytesIO(_archive(ZipInfo("file.txt")))) as archive:
-        result = archive.extractall(
+        result = archive.safe_extractall(
             tmp_path, policy=ExtractPolicy(overwrite_policy=OverwritePolicy.RENAME)
         )
     assert result.members[0].target == tmp_path / "file.1.txt"

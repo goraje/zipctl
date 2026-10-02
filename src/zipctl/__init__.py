@@ -22,18 +22,6 @@ from zipctl.zipfile.exceptions import (
     ExtractionQuotaExceeded,
     ExtractionSecurityError,
 )
-from zipctl.zipfile.extract import (
-    ExtractionError,
-    ExtractMemberResult,
-    ExtractPolicy,
-    ExtractPolicyRule,
-    ExtractResult,
-    ExtractViolation,
-    MemberAssessment,
-    MemberStatus,
-    OverwritePolicy,
-    ViolationAction,
-)
 from zipctl.zipfile.file import (
     INHERIT_ENCRYPTION,
     EncryptionOverride,
@@ -50,6 +38,18 @@ from zipctl.zipfile.password import (
     PasswordStatus,
 )
 from zipctl.zipfile.path import Path
+from zipctl.zipfile.policy import (
+    ExtractionError,
+    ExtractMemberResult,
+    ExtractPolicy,
+    ExtractPolicyRule,
+    ExtractResult,
+    ExtractViolation,
+    MemberAssessment,
+    MemberStatus,
+    OverwritePolicy,
+    ViolationAction,
+)
 from zipctl.zipfile.policy_config import (
     PolicyConfigError,
     PolicyIssue,

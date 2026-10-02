@@ -11,7 +11,7 @@ from typing import Protocol, TextIO
 from unicodedata import east_asian_width
 
 from zipctl.cli.output import human_size, printable
-from zipctl.zipfile.extract import MemberStatus
+from zipctl.zipfile.policy import MemberStatus
 from zipctl.zipfile.progress import ProgressCallback, ProgressEvent, ProgressPhase
 
 __all__ = [

@@ -41,7 +41,7 @@ def main() -> None:
                 max_zstd_window_bytes=1 << 20,
             ),
         ) as archive:
-            archive.extractall(
+            archive.safe_extractall(
                 args.destination,
                 policy=ExtractPolicy(
                     max_member_size=1 << 20,

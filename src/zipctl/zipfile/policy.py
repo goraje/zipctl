@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -124,6 +125,16 @@ class ExtractPolicy:
         from zipctl.zipfile.policy_config import validate_policy
 
         validate_policy(self)
+        if self.allow_overwrite:
+            warnings.warn(
+                "allow_overwrite is deprecated; use "
+                "overwrite_policy=OverwritePolicy.REPLACE",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            # Folded into overwrite_policy, which alone is read from here on.
+            object.__setattr__(self, "allow_overwrite", False)
+            object.__setattr__(self, "overwrite_policy", OverwritePolicy.REPLACE)
 
 
 @dataclass(frozen=True)
