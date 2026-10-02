@@ -14,12 +14,8 @@ from zipctl.cryptography import (
     wz_aes_stores_crc,
 )
 from zipctl.exceptions import BadZipFile
-from zipctl.zipfile.info import (
-    WzAesExtra,
-    ZipInfo,
-    _Extra,
-    _sanitize_filename,
-)
+from zipctl.zipfile.info import WzAesExtra, ZipInfo
+from zipctl.zipfile.info.extra import _Extra, sanitize_filename
 from zipctl.zipfile.shared import (
     MASK_ENCRYPTED,
     MASK_STRONG_ENCRYPTION,
@@ -33,22 +29,22 @@ from zipctl.zipfile.shared import (
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_filename
+# sanitize_filename
 # ---------------------------------------------------------------------------
 
 
 class TestSanitizeFilename:
     def test_plain_filename_unchanged(self) -> None:
-        assert _sanitize_filename("hello.txt") == "hello.txt"
+        assert sanitize_filename("hello.txt") == "hello.txt"
 
     def test_null_byte_truncates(self) -> None:
-        assert _sanitize_filename("file\x00.txt") == "file"
+        assert sanitize_filename("file\x00.txt") == "file"
 
     def test_null_byte_at_start_gives_empty(self) -> None:
-        assert _sanitize_filename("\x00rest") == ""
+        assert sanitize_filename("\x00rest") == ""
 
     def test_forward_slash_path_unchanged(self) -> None:
-        assert _sanitize_filename("a/b/c.txt") == "a/b/c.txt"
+        assert sanitize_filename("a/b/c.txt") == "a/b/c.txt"
 
 
 # ---------------------------------------------------------------------------

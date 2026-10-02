@@ -11,10 +11,10 @@ import os
 import shutil
 import threading
 import warnings
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import (
+    Iterable,
+)
 from functools import partial
-from pathlib import Path
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Literal, TypeAlias, cast, overload
 
@@ -31,11 +31,21 @@ else:
 if TYPE_CHECKING:
     from zipctl.cryptography.base import BaseZipEncryptor
 
-from zipctl.compression import ZIP_LZMA, ZIP_STORED, Registry, registry
+from zipctl.compression import (
+    ZIP_STORED,
+    Registry,
+    registry,
+)
 from zipctl.cryptography import WZ_AES, ZIP_CRYPTO
-from zipctl.cryptography.aes import EXTRA_WZ_AES, AesKeyCache, AesZipEncryptor
+from zipctl.cryptography.aes import (
+    AesKeyCache,
+    AesZipEncryptor,
+)
 from zipctl.cryptography.zipcrypto import ZipCryptoEncryptor
-from zipctl.exceptions import BadZipFile, LargeZipFile, PasswordRequired
+from zipctl.exceptions import (
+    BadZipFile,
+    PasswordRequired,
+)
 from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.assessment import (
     ArchiveAssessment,
@@ -44,61 +54,55 @@ from zipctl.zipfile.assessor import (
     assess_archive,
     default_assessment_policy,
 )
-from zipctl.zipfile.ext import ZipExtFile
 from zipctl.zipfile.extract import (
     ExtractionError,
     ExtractMemberResult,
     ExtractPolicy,
     ExtractResult,
-    MemberStatus,
-    OverwritePolicy,
-    normalized_destination,
 )
-from zipctl.zipfile.info import WzAesExtra, ZipInfo, _Extra
+from zipctl.zipfile.file.encryption import (
+    INHERIT_ENCRYPTION,
+    EncryptionOverride,
+    ZipFileExtra,
+)
+from zipctl.zipfile.file.extraction import (
+    PasswordProvider,
+    extract_all_with_progress,
+    extract_member,
+    extract_members_with_policy,
+)
+from zipctl.zipfile.file.lifecycle import (
+    close_archive,
+    open_archive_file,
+    start_appending,
+    start_new_archive,
+)
+from zipctl.zipfile.file.reading import open_to_read
+from zipctl.zipfile.file.writing import copy_raw, open_to_write
+from zipctl.zipfile.info import (
+    ZipInfo,
+)
 from zipctl.zipfile.inspection import (
     InspectionMember,
     InspectionResult,
     build_inspection_result,
-)
-from zipctl.zipfile.io_wrappers import (
-    ClosableZipStream,
-    Tellable,
-)
-from zipctl.zipfile.materialize import (
-    ExtractionQuota,
-    MaterializationResult,
-    materialize_member,
 )
 from zipctl.zipfile.password import (
     MemberPasswordCheck,
     PasswordCheckResult,
     check_member_password,
 )
-from zipctl.zipfile.policy_extraction import extract_with_policy
 from zipctl.zipfile.progress import (
     ProgressCallback,
-    ProgressReporter,
-    propagate_callback_errors,
 )
 from zipctl.zipfile.records import (
     looks_like_zip,
     read_directory,
-    read_local_header,
-    write_directory,
 )
 from zipctl.zipfile.shared import (
-    MASK_COMPRESS_OPTION_1,
-    MASK_COMPRESS_OPTIONS,
-    MASK_ENCRYPTED,
-    MASK_USE_DATA_DESCRIPTOR,
-    ZIP64_LIMIT,
-    ZIP_FILECOUNT_LIMIT,
     ZIP_MAX_COMMENT,
     ReadWriteMode,
     StrPath,
-)
-from zipctl.zipfile.validators import (
-    member_target_name,
 )
 from zipctl.zipfile.write import ZipWriteFile
 from zipctl.zipfile.write_coordinator import WriteCoordinator
@@ -109,6 +113,7 @@ __all__ = [
     "is_zipfile",
     "INHERIT_ENCRYPTION",
     "EncryptionOverride",
+    "ZipFileExtra",
     "InspectionMember",
     "InspectionResult",
 ]
@@ -117,50 +122,6 @@ __all__ = [
 # Type aliases
 # ---------------------------------------------------------------------------
 _ZipFileMode: TypeAlias = Literal["r", "w", "x", "a"]
-
-# File modes tried in order when opening an archive path: appending falls back
-# to creating the file, and a read/write handle falls back to write-only.
-_OPEN_MODES = {
-    "r": ("rb",),
-    "w": ("w+b", "wb"),
-    "x": ("x+b", "xb"),
-    "a": ("r+b", "w+b", "wb"),
-}
-
-
-def _open_archive_file(path: str, mode: str) -> IO[bytes]:
-    *fallbacks, last = _OPEN_MODES[mode]
-    for file_mode in fallbacks:
-        try:
-            return open(path, file_mode)
-        except OSError:
-            continue
-    return open(path, last)
-
-
-class _InheritEncryption:
-    __slots__: tuple[str, ...] = ()
-
-    @override
-    def __repr__(self) -> str:
-        return "INHERIT_ENCRYPTION"
-
-
-INHERIT_ENCRYPTION = _InheritEncryption()
-EncryptionOverride: TypeAlias = str | None | _InheritEncryption
-
-# Extraction can take one password for the whole archive, or a callable that is
-# asked for the password of each encrypted member (return None for "unknown").
-PasswordProvider: TypeAlias = Callable[[ZipInfo], bytes | None]
-
-
-def _password_for(
-    member: ZipInfo, pwd: bytes | PasswordProvider | None
-) -> bytes | None:
-    """Resolve *pwd* for *member*; a provider is asked only for encrypted members."""
-    if pwd is None or isinstance(pwd, bytes):
-        return pwd
-    return pwd(member) if member.is_encrypted else None
 
 
 def is_zipfile(filename: StrPath | IO[bytes]) -> bool:
@@ -188,29 +149,6 @@ def is_zipfile(filename: StrPath | IO[bytes]) -> bool:
     except (OSError, BadZipFile):
         pass
     return result
-
-
-@dataclass(frozen=True)
-class ZipFileExtra:
-    """Immutable extra options for :class:`ZipFile`.
-
-    Attributes:
-        force_wz_aes_version: Override the WinZip AES version written to the
-            extra field (``1`` or ``2``). ``None`` selects the metadata-safe
-            AES version 2. Version 1 exposes the plaintext CRC and should only
-            be selected for compatibility with older tools.
-        wz_aes_nbits: AES key size in bits (``128``, ``192``, or ``256``).
-            Defaults to ``256``.
-    """
-
-    force_wz_aes_version: int | None = None
-    wz_aes_nbits: int = 256
-
-    def __post_init__(self) -> None:
-        if self.force_wz_aes_version not in (None, 1, 2):
-            raise ValueError("force_wz_aes_version must be 1 or 2")
-        if self.wz_aes_nbits not in (128, 192, 256):
-            raise ValueError("wz_aes_nbits must be 128, 192 or 256")
 
 
 class ZipFile:
@@ -317,7 +255,7 @@ class ZipFile:
         if isinstance(file, str):
             self._file_passed: bool = False
             self.filename: str | None = file
-            self.fp = _open_archive_file(file, mode)
+            self.fp = open_archive_file(file, mode)
         else:
             self._file_passed = True
             self.fp = file
@@ -336,42 +274,15 @@ class ZipFile:
             if mode == "r":
                 self._read_directory()
             elif mode in ("w", "x"):
-                self._start_new_archive()
+                start_new_archive(self)
             elif mode == "a":
-                self._start_appending()
+                start_appending(self)
         except BaseException:
             fp = self.fp
             self.fp = None
             assert fp is not None
             self._fpclose(fp)
             raise
-
-    def _start_new_archive(self) -> None:
-        """Position a new archive at the stream's current offset."""
-        assert self.fp is not None
-        self._did_modify = True
-        try:
-            self.start_dir = self.fp.tell()
-        except (AttributeError, OSError):
-            self.fp = cast(IO[bytes], Tellable(self.fp))  # pyright: ignore[reportInvalidCast]  # duck-typed
-            self.start_dir = 0
-            self._seekable = False
-        else:
-            try:
-                self.fp.seek(self.start_dir)
-            except (AttributeError, OSError):
-                self._seekable = False
-
-    def _start_appending(self) -> None:
-        """Append to an existing archive, or to the stream's end if it is not one."""
-        assert self.fp is not None
-        try:
-            self._read_directory()
-            self.fp.seek(self.start_dir)
-        except BadZipFile:
-            self.fp.seek(0, 2)
-            self._did_modify = True
-            self.start_dir = self.fp.tell()
 
     def __enter__(self) -> Self:
         """Enter the runtime context and return this archive."""
@@ -530,7 +441,7 @@ class ZipFile:
                 MemberPasswordCheck(
                     info.filename,
                     check_member_password(
-                        partial(self._open_to_read, "r", info, pwd), info, full=full
+                        partial(open_to_read, self, "r", info, pwd), info, full=full
                     ),
                 )
                 for info in infos
@@ -731,96 +642,7 @@ class ZipFile:
 
         self._write_coordinator.ensure_readable()
 
-        return cast(IO[bytes], self._open_to_read(mode, zinfo, pwd))  # pyright: ignore[reportInvalidCast]  # file-like, not an IO subclass
-
-    def _open_to_read(
-        self, mode: ReadWriteMode, zinfo: ZipInfo, pwd: bytes | None
-    ) -> ZipExtFile:
-        """Open *zinfo* for reading and return a ZipExtFile.
-
-        Validates the local file header, checks for overlapping entries, sets
-        up decryption when the entry is encrypted, and returns a
-        :class:`~zipctl.zipfile.ext.ZipExtFile` backed by the archive
-        stream.
-
-        Args:
-            mode: Read mode (always ``'r'``).
-            zinfo: Metadata for the entry to open.
-            pwd: Decryption password, or ``None`` for unencrypted entries.
-
-        Returns:
-            A :class:`~zipctl.zipfile.ext.ZipExtFile` positioned at the
-            start of the compressed data.
-
-        Raises:
-            BadZipFile: If the local header is truncated, has a bad signature,
-                the filename mismatches the central directory, or entries
-                overlap.
-            NotImplementedError: If compressed patch data or strong encryption
-                are detected.
-            PasswordRequired: If the entry is encrypted and no password is
-                available.
-            BadPassword: If the password does not match the entry.
-            TypeError: If *pwd* is not ``bytes``.
-        """
-        with self._lock:
-            if self.fp is None:
-                raise ValueError("Attempt to read ZIP archive that was already closed")
-            self._write_coordinator.ensure_readable()
-            self._file_ref_cnt += 1
-            zef_file = ClosableZipStream(
-                self.fp,
-                zinfo.header_offset,
-                self._fpclose,
-                self._lock,
-                lambda: self._write_coordinator.active,
-            )
-        try:
-            read_local_header(zef_file, zinfo, self.metadata_encoding)
-
-            if (
-                zinfo._end_offset is not None
-                and zef_file.tell() + zinfo.compress_size > zinfo._end_offset
-            ):
-                if zinfo._end_offset == zinfo.header_offset:
-                    warnings.warn(
-                        f"Overlapped entries: {zinfo.orig_filename!r} "
-                        f"(possible zip bomb)",
-                        stacklevel=2,
-                    )
-                else:
-                    raise BadZipFile(
-                        f"Overlapped entries: {zinfo.orig_filename!r} "
-                        f"(possible zip bomb)"
-                    )
-
-            is_encrypted = zinfo.flag_bits & MASK_ENCRYPTED
-            if is_encrypted:
-                if not pwd:
-                    pwd = self.pwd
-                if pwd and not isinstance(pwd, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
-                    raise TypeError("pwd: expected bytes, got %s" % type(pwd).__name__)  # pyright: ignore[reportUnreachable]
-                if not pwd:
-                    raise PasswordRequired(
-                        "File %r is encrypted, password "
-                        "required for extraction" % zinfo.orig_filename
-                    )
-            else:
-                pwd = None
-
-            return ZipExtFile(
-                zef_file,
-                mode,
-                zinfo,
-                True,
-                pwd,
-                self._compression_registry,
-                self._aes_keys,
-                self.limits,
-            )
-        except BaseException:
-            zef_file.close()
-            raise
+        return cast(IO[bytes], open_to_read(self, mode, zinfo, pwd))  # pyright: ignore[reportInvalidCast]  # file-like, not an IO subclass
 
     def _open_to_write(
         self,
@@ -832,123 +654,15 @@ class ZipFile:
         extra: ZipFileExtra | None = None,
         raw: bool = False,
     ) -> ZipWriteFile:
-        """Open *zinfo* for writing and return a ZipWriteFile.
-
-        Initialises CRC and size fields, computes the ZIP64 requirement,
-        writes the local file header, sets up encryption if configured, and
-        registers the returned handle as the active write handle.
-
-        Args:
-            zinfo: Metadata for the new entry. Modified in place (CRC, sizes,
-                flags, ``header_offset``).
-            force_zip64: When ``True``, force ZIP64 local header fields
-                regardless of file size.
-            raw: The entry takes compressed data (:meth:`_copy_raw`): *zinfo*
-                keeps its CRC, sizes and compression option bits, and its
-                ``compress_size`` says how much is coming.
-
-        Returns:
-            A :class:`~zipctl.zipfile.write.ZipWriteFile` ready to
-            accept data.
-
-        Raises:
-            ValueError: If *force_zip64* is ``True`` but ZIP64 is not allowed,
-                or if a write handle is already open.
-            LargeZipFile: If ZIP64 is required but not allowed.
-        """
-        if force_zip64 and not self._allow_zip64:
-            raise ValueError(
-                "force_zip64 is True, but allowZip64 was False when opening "
-                "the ZIP file."
-            )
-        reservation = self._write_coordinator.reserve()
-        try:
-            if self._write_failed:
-                raise ValueError(
-                    "Cannot recover a failed write on a non-seekable archive"
-                )
-            if self.fp is None:
-                raise ValueError("Attempt to write ZIP archive that was already closed")
-            zip64 = self._prepare_header(zinfo, force_zip64=force_zip64, raw=raw)
-
-            assert self.fp is not None
-            if self._seekable:
-                self.fp.seek(self.start_dir)
-            zinfo.header_offset = self.fp.tell()
-
-            self._check_writable(zinfo)
-            self._mark_modified()
-
-            encryptor = self._entry_encryptor(zinfo, encryption, password, extra)
-
-            return ZipWriteFile(
-                self,
-                zinfo,
-                zip64,
-                encryptor,
-                self._compression_registry,
-                reservation,
-                raw,
-            )
-        except BaseException:
-            if not self._seekable:
-                self._write_failed = True
-            self._write_coordinator.release(reservation)
-            raise
-
-    def _prepare_header(self, zinfo: ZipInfo, *, force_zip64: bool, raw: bool) -> bool:
-        """Set the flags and default attributes of an entry about to be written.
-
-        Returns whether the local header needs ZIP64 fields.
-        """
-        coming = zinfo.compress_size
-        zinfo._stored_filename = None
-        zinfo.aes_extra = WzAesExtra()
-        zinfo.extra = _Extra.strip(zinfo.extra, (EXTRA_WZ_AES,))
-        zinfo.compress_size = 0
-        if raw:
-            zinfo.flag_bits &= MASK_COMPRESS_OPTIONS
-        else:
-            zinfo.CRC = 0
-            zinfo.flag_bits = 0x00
-            if zinfo.compress_type == ZIP_LZMA:
-                zinfo.flag_bits |= MASK_COMPRESS_OPTION_1
-        if not self._seekable:
-            zinfo.flag_bits |= MASK_USE_DATA_DESCRIPTOR
-
-        if not zinfo.external_attr:
-            zinfo.external_attr = 0o600 << 16
-
-        zip64 = force_zip64 or (
-            zinfo.file_size + zinfo.file_size // 20 > ZIP64_LIMIT
-            # the encryption adds a few bytes of its own to what is coming
-            or (raw and coming + 64 > ZIP64_LIMIT)
-        )
-        if not self._allow_zip64 and zip64:
-            raise LargeZipFile("Filesize would require ZIP64 extensions")
-        return zip64
-
-    def _entry_encryptor(
-        self,
-        zinfo: ZipInfo,
-        encryption: EncryptionOverride,
-        password: bytes | None,
-        extra: ZipFileExtra | None,
-    ) -> BaseZipEncryptor | None:
-        """The encryptor for an entry, or ``None`` if it is stored unencrypted."""
-        effective_encryption = (
-            self.encryption if encryption is INHERIT_ENCRYPTION else encryption
-        )
-        if effective_encryption is None and password is not None:
-            raise ValueError("password cannot be used for an unencrypted entry")
-        if not effective_encryption:
-            return None
-        zinfo.flag_bits |= MASK_ENCRYPTED
-        return self.get_encryptor(
-            cast(str, effective_encryption),
-            password,
-            nbits=extra.wz_aes_nbits if extra else None,
-            force_wz_aes_version=extra.force_wz_aes_version if extra else None,
+        """Open *zinfo* for writing; see :func:`writing.open_to_write`."""
+        return open_to_write(
+            self,
+            zinfo,
+            force_zip64,
+            encryption=encryption,
+            password=password,
+            extra=extra,
+            raw=raw,
         )
 
     def _copy_raw(
@@ -964,35 +678,23 @@ class ZipFile:
         password: bytes | None = None,
         extra: ZipFileExtra | None = None,
     ) -> None:
-        """Copy member *info* of *source* into this archive as *zinfo*, without
-        decompressing or compressing it.
-
-        The compressed bytes are decrypted with *pwd* and written again under
-        *encryption* and *password*, so a copy that keeps the compression stays
-        byte for byte the same inside.  Nothing is decompressed, so the caller
-        vouches for *crc* and *size* (the CRC-32 and length of the uncompressed
-        data); a plain or ZipCrypto member is not checked here at all.  The
-        entry keeps *info*'s compression method and compression option bits.
-        ``zinfo`` needs the filename, date and attributes; its compression,
-        sizes and option bits are set here.
+        """Copy a member of *source* here without recompressing it.
 
         Private, but a contract for zipctl's own copy commands (``encrypt``,
-        ``decrypt`` and ``rewrite``); ``tests/unit/zipfile/test_raw_copy.py``
-        pins it.
+        ``decrypt`` and ``rewrite``); see :func:`writing.copy_raw`.
         """
-        zinfo.compress_type = info.compress_type
-        zinfo.flag_bits = info.flag_bits
-        zinfo.compress_size = info.compress_size
-        zinfo.CRC = crc
-        zinfo.file_size = size
-        with (
-            cast(ZipExtFile, source.open(info, "r", pwd)) as reader,  # pyright: ignore[reportInvalidCast]
-            self._open_to_write(
-                zinfo, encryption=encryption, password=password, extra=extra, raw=True
-            ) as writer,
-        ):
-            for chunk in reader._raw_chunks():
-                writer._write_raw(chunk)
+        copy_raw(
+            self,
+            source,
+            info,
+            zinfo,
+            crc=crc,
+            size=size,
+            pwd=pwd,
+            encryption=encryption,
+            password=password,
+            extra=extra,
+        )
 
     @overload
     def extract(
@@ -1044,15 +746,17 @@ class ZipFile:
             The normalized path of the extracted file or directory.
         """
         if policy is not None:
-            result = self._extract_with_policy([member], path, pwd, policy, progress)
+            result = extract_members_with_policy(
+                self, [member], path, pwd, policy, progress
+            )
             if result.failed_count:
                 raise ExtractionError(result)
             return result.members[0]
 
         path = os.fspath(os.getcwd() if path is None else path)
         if progress is None:
-            return str(self._extract_member(member, path, pwd).target)
-        return str(self._extract_all_with_progress([member], path, pwd, progress)[0])
+            return str(extract_member(self, member, path, pwd).target)
+        return str(extract_all_with_progress(self, [member], path, pwd, progress)[0])
 
     @overload
     def extractall(
@@ -1109,144 +813,19 @@ class ZipFile:
             # Entries rather than names, so duplicate names keep their own data.
             members = list(self.filelist)
         if policy is not None:
-            result = self._extract_with_policy(
-                list(members), path, pwd, policy, progress
+            result = extract_members_with_policy(
+                self, list(members), path, pwd, policy, progress
             )
             if result.failed_count:
                 raise ExtractionError(result)
             return result
         path = os.fspath(os.getcwd() if path is None else path)
         if progress is not None:
-            self._extract_all_with_progress(list(members), path, pwd, progress)
+            extract_all_with_progress(self, list(members), path, pwd, progress)
             return None
         for zipinfo in members:
-            self._extract_member(zipinfo, path, pwd)
+            extract_member(self, zipinfo, path, pwd)
         return None
-
-    def _extract_all_with_progress(
-        self,
-        members: list[str | ZipInfo],
-        path: str,
-        pwd: bytes | PasswordProvider | None,
-        progress: ProgressCallback,
-    ) -> list[Path]:
-        infos = [m if isinstance(m, ZipInfo) else self.getinfo(m) for m in members]
-        reporter = ProgressReporter(
-            progress, len(infos), sum(info.file_size for info in infos)
-        )
-        targets: list[Path] = []
-        with propagate_callback_errors():
-            for index, info in enumerate(infos):
-                reporter.start(index, info)
-                result = self._extract_member(info, path, pwd, reporter=reporter)
-                reporter.finish(MemberStatus.EXTRACTED, result.bytes_written)
-                targets.append(result.target)
-        return targets
-
-    def _extract_with_policy(
-        self,
-        members: list[str | ZipInfo],
-        path: StrPath | None,
-        pwd: bytes | PasswordProvider | None,
-        policy: ExtractPolicy,
-        progress: ProgressCallback | None = None,
-    ) -> ExtractResult:
-        destination = normalized_destination(path or os.getcwd())
-        policy_root = (
-            normalized_destination(policy.destination_root)
-            if policy.destination_root is not None
-            else destination
-        )
-        infos = [
-            member if isinstance(member, ZipInfo) else self.getinfo(member)
-            for member in members
-        ]
-        reporter = (
-            None
-            if progress is None
-            else ProgressReporter(
-                progress, len(infos), sum(info.file_size for info in infos)
-            )
-        )
-        with propagate_callback_errors():
-            return extract_with_policy(
-                infos,
-                destination,
-                policy_root,
-                policy,
-                lambda info, target, quota, reporter: self._extract_member(
-                    info,
-                    str(destination),
-                    pwd,
-                    target_override=target,
-                    quota=quota,
-                    fsync=policy.fsync_files,
-                    overwrite=(
-                        OverwritePolicy.REPLACE
-                        if policy.allow_overwrite
-                        else policy.overwrite_policy
-                    ),
-                    reporter=reporter,
-                ),
-                reporter,
-            )
-
-    def _extract_member(
-        self,
-        member: str | ZipInfo,
-        destination: str,
-        pwd: bytes | PasswordProvider | None,
-        *,
-        target_override: Path | None = None,
-        quota: ExtractionQuota | None = None,
-        fsync: bool = True,
-        reporter: ProgressReporter | None = None,
-        overwrite: OverwritePolicy = OverwritePolicy.REPLACE,
-    ) -> MaterializationResult:
-        """Extract *member* to *targetpath* and return the materialization result.
-
-        Resolves the platform path, guards against path traversal, creates
-        parent directories as needed, and writes the file content (or creates
-        a directory) at the resolved location.
-
-        Args:
-            member: Archive member name or
-                :class:`~zipctl.zipfile.info.ZipInfo` instance.
-            destination: Root directory under which the member is extracted.
-            pwd: Decryption password, or ``None``.
-
-        Returns:
-            The :class:`~zipctl.zipfile.materialize.MaterializationResult`
-            describing what was written.
-
-        Raises:
-            ValueError: If the sanitized archive name is empty for a file
-                entry.
-        """
-        if not isinstance(member, ZipInfo):
-            member = self.getinfo(member)
-
-        _, parts = member_target_name(member.filename)
-        arcname = os.path.sep.join(parts)
-
-        if not arcname and not member.is_dir():
-            raise ValueError("Empty filename.")
-
-        if target_override is None:
-            targetpath = os.path.normpath(os.path.join(destination, arcname))
-        else:
-            targetpath = os.fspath(target_override)
-
-        return materialize_member(
-            member,
-            targetpath,
-            lambda: self.open(member, pwd=_password_for(member, pwd)),
-            destination,
-            quota,
-            fsync=fsync,
-            reporter=reporter,
-            overwrite=overwrite,
-        )
 
     def _mark_modified(self) -> None:
         """Record that the central directory must be rewritten on close."""
@@ -1256,39 +835,6 @@ class ZipFile:
         """Register a fully written entry in the in-memory directory."""
         self.filelist.append(zinfo)
         self.NameToInfo[zinfo.filename] = zinfo
-
-    def _check_writable(self, zinfo: ZipInfo) -> None:
-        """Validate that *zinfo* can be written to the archive.
-
-        Issues a warning for duplicate names and raises on invalid archive
-        state, unsupported compression, or ZIP64 violations.
-
-        Args:
-            zinfo: Metadata for the entry about to be written.
-
-        Raises:
-            ValueError: If the archive is not open for writing or is already
-                closed.
-            LargeZipFile: If a size or count threshold would require ZIP64
-                extensions that are not enabled.
-        """
-        if zinfo.filename in self.NameToInfo:
-            warnings.warn("Duplicate name: %r" % zinfo.filename, stacklevel=3)
-        if self.mode not in ("w", "x", "a"):
-            raise ValueError("write() requires mode 'w', 'x', or 'a'")
-        if not self.fp:
-            raise ValueError("Attempt to write ZIP archive that was already closed")
-        self._compression_registry.check_compression(zinfo.compress_type)
-        if not self._allow_zip64:
-            requires_zip64 = None
-            if len(self.filelist) >= ZIP_FILECOUNT_LIMIT:
-                requires_zip64 = "Files count"
-            elif zinfo.file_size > ZIP64_LIMIT:
-                requires_zip64 = "Filesize"
-            elif zinfo.header_offset > ZIP64_LIMIT:
-                requires_zip64 = "Zipfile size"
-            if requires_zip64:
-                raise LargeZipFile(requires_zip64 + " would require ZIP64 extensions")
 
     def write(
         self,
@@ -1470,52 +1016,7 @@ class ZipFile:
         if self.fp is None:
             return
         with self._lock:
-            self._close_archive()
-
-    def _close_archive(self) -> None:
-        self._write_coordinator.wait_for_finalization()
-        if self.fp is None:
-            return
-        if self._write_coordinator.active:
-            raise ValueError(
-                "Can't close the ZIP file while there is "
-                "an open writing handle on it. "
-                "Close the writing handle before closing the zip."
-            )
-
-        try:
-            if self._write_failed:
-                raise ValueError("Cannot finalize a failed non-seekable archive")
-            if self.mode in ("w", "x", "a") and self._did_modify:
-                if self._seekable:
-                    self.fp.seek(self.start_dir)
-                self._write_end_record()
-        finally:
-            self._aes_keys.clear()
-            fp = self.fp
-            self.fp = None
-            self._fpclose(fp)
-
-    def _write_end_record(self) -> None:
-        """Write the central directory and end records, then flush.
-
-        Truncates seekable output afterwards, removing an old directory or
-        abandoned bytes from a failed member write.
-
-        Raises:
-            LargeZipFile: If ZIP64 is required but not allowed.
-        """
-        assert self.fp is not None
-        write_directory(
-            self.fp,
-            self.filelist,
-            self.start_dir,
-            self._comment,
-            allow_zip64=self._allow_zip64,
-        )
-        if self._seekable:
-            self.fp.truncate()
-        self.fp.flush()
+            close_archive(self)
 
     def _fpclose(self, fp: IO[bytes]) -> None:
         """Decrement the file reference count and close *fp* when it reaches zero.

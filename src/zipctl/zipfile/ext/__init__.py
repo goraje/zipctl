@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 
 from typing_extensions import override
 
@@ -19,10 +19,15 @@ from zipctl.compression.methods import (
 )
 from zipctl.cryptography.aes import AesKeyCache, AesZipDecrypter
 from zipctl.cryptography.zipcrypto import ZipCryptoDecrypter
-from zipctl.exceptions import BadZipFile, PasswordRequired
+from zipctl.exceptions import BadZipFile
 from zipctl.limits import ArchiveLimits
+from zipctl.zipfile.ext.decryption import (
+    make_decrypter,
+    read_encryption_header,
+    read_header,
+)
 from zipctl.zipfile.info import ZipInfo
-from zipctl.zipfile.io_wrappers import ClosableZipStream, read_exactly
+from zipctl.zipfile.io_wrappers import ClosableZipStream
 from zipctl.zipfile.shared import ReadWriteMode, crc32
 
 __all__ = [
@@ -138,7 +143,7 @@ class ZipExtFile(io.BufferedIOBase):
         except AttributeError:
             pass
 
-        self._decrypter_cls: Callable[..., ZipCryptoDecrypter | AesZipDecrypter] | None
+        self._decrypter_cls: type[ZipCryptoDecrypter | AesZipDecrypter] | None
         if self._zinfo.is_encrypted:
             self._decrypter_cls = self._setup_decrypter()
         else:
@@ -164,47 +169,13 @@ class ZipExtFile(io.BufferedIOBase):
             PasswordRequired: If the entry is encrypted but no password was
                 supplied.
         """
-        decrypter_cls = self._decrypter_class_for_entry()
-        if decrypter_cls is AesZipDecrypter:
-            if not self._pwd:
-                raise PasswordRequired(
-                    f"File {self.name!r} is encrypted with WZ_AES encryption and "
-                    "requires a password."
-                )
-            encryption_header_length = decrypter_cls.header_length(self._zinfo)
-            self.encryption_header = self._read_header(encryption_header_length, "AES")
-            self._orig_compress_left -= encryption_header_length
-            self._orig_compress_left -= decrypter_cls.authentication_trailer_length
-            if self._orig_compress_left < 0:
-                raise BadZipFile("AES entry is shorter than its encryption overhead")
-            return decrypter_cls
-        else:
-            if not self._pwd:
-                raise PasswordRequired(
-                    f"File {self.name!r} is encrypted, password required for extraction"
-                )
-            self.encryption_header = self._read_header(
-                ZipCryptoDecrypter.encryption_header_length, "ZipCrypto"
-            )
-            self._orig_compress_left -= decrypter_cls.header_length(self._zinfo)
-            if self._orig_compress_left < 0:
-                raise BadZipFile(
-                    "ZipCrypto entry is shorter than its encryption header"
-                )
-            return decrypter_cls
-
-    def _read_header(self, size: int, method: str) -> bytes:
-        try:
-            return read_exactly(self._fileobj, size)
-        except EOFError as exc:
-            raise BadZipFile(f"Truncated {method} encryption header") from exc
-
-    def _decrypter_class_for_entry(
-        self,
-    ) -> type[ZipCryptoDecrypter | AesZipDecrypter]:
-        if self._zinfo.aes_extra.wz_aes_version is not None:
-            return AesZipDecrypter
-        return ZipCryptoDecrypter
+        decrypter_cls, self.encryption_header, overhead = read_encryption_header(
+            self._fileobj, self._zinfo, self._pwd
+        )
+        self._orig_compress_left -= overhead
+        if self._orig_compress_left < 0:
+            raise BadZipFile("Encrypted entry is shorter than its encryption overhead")
+        return decrypter_cls
 
     def _get_decrypter(self) -> ZipCryptoDecrypter | AesZipDecrypter | None:
         """Instantiate and return the decrypter for this entry.
@@ -219,13 +190,16 @@ class ZipExtFile(io.BufferedIOBase):
         """
         if self._decrypter_cls is None:
             return None
-        pwd = self._pwd
-        assert pwd is not None, "an encrypted entry is only opened with a password"
-        if self._decrypter_cls is AesZipDecrypter:
-            return AesZipDecrypter(
-                self._zinfo, pwd, self.encryption_header, self._key_cache
-            )
-        return ZipCryptoDecrypter(self._zinfo, pwd, self.encryption_header)
+        assert self._pwd is not None, (
+            "an encrypted entry is only opened with a password"
+        )
+        return make_decrypter(
+            self._decrypter_cls,
+            self._zinfo,
+            self._pwd,
+            self.encryption_header,
+            self._key_cache,
+        )
 
     def _init_read_state(self) -> None:
         """(Re-)initialise all reading state.
@@ -295,7 +269,7 @@ class ZipExtFile(io.BufferedIOBase):
                 yield self._read2(self.MAX_READ_SIZE)
             if isinstance(self._decrypter, AesZipDecrypter):
                 self._decrypter.check_hmac(
-                    self._read_header(self._decrypter.hmac_size, "HMAC")
+                    read_header(self._fileobj, self._decrypter.hmac_size, "HMAC")
                 )
         except EOFError:
             raise BadZipFile(f"Truncated data for file {self.name!r}") from None
