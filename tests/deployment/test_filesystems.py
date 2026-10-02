@@ -71,9 +71,12 @@ def test_real_filesystem_without_hardlinks() -> None:
         destination = root / "output"
         destination.mkdir()
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
-            with pytest.raises(ExtractionError):
+            result = archive.extractall(destination, policy=ExtractPolicy())
+        assert result.failed_count == 0
+        assert (destination / "file.txt").read_bytes() == b"payload"
+        with ZipFile(io.BytesIO(archive_bytes())) as archive:
+            with pytest.raises(ExtractionError):  # still no-clobber
                 archive.extractall(destination, policy=ExtractPolicy())
-        assert list(destination.iterdir()) == []
         assert original.read_bytes() == b"original"
         with ZipFile(io.BytesIO(archive_bytes())) as archive:
             result = archive.extractall(
@@ -82,3 +85,21 @@ def test_real_filesystem_without_hardlinks() -> None:
             )
         assert result.failed_count == 0
         assert (destination / "file.txt").read_bytes() == b"payload"
+
+
+def test_extraction_without_hard_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(os, "link", refuse)
+    for _ in range(2):
+        with ZipFile(io.BytesIO(archive_bytes())) as archive:
+            result = archive.extractall(
+                tmp_path, policy=ExtractPolicy(overwrite_policy=OverwritePolicy.RENAME)
+            )
+        assert result.failed_count == 0
+    assert (tmp_path / "file.txt").read_bytes() == b"payload"
+    assert (tmp_path / "file.1.txt").read_bytes() == b"payload"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["file.1.txt", "file.txt"]

@@ -318,6 +318,32 @@ def _temporary_name(params: MaterializeParams, dir_fd: int | None) -> str:
     return name if dir_fd is not None else os.path.join(params.directory, name)
 
 
+def publish_exclusive(temp: str, name: str, dir_fd: int | None) -> None:
+    """Move *temp* to *name*, raising ``FileExistsError`` if *name* exists.
+
+    A hard link is atomic and never exposes a partial file. Filesystems
+    without hard links (FAT, exFAT, some network mounts) instead get an
+    ``O_EXCL`` placeholder that is then replaced by *temp*: still no-clobber
+    against files that already exist, but the empty placeholder is briefly
+    visible, and a file swapped in over it during that instant is replaced.
+    """
+    try:
+        os.link(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd, follow_symlinks=False)
+    except FileExistsError:
+        raise
+    except OSError:
+        placeholder = os.open(
+            name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600, dir_fd=dir_fd
+        )
+        os.close(placeholder)
+        try:
+            os.replace(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except BaseException:
+            with suppress(FileNotFoundError):
+                os.unlink(name, dir_fd=dir_fd)
+            raise
+
+
 def _commit_temp(
     params: MaterializeParams, temp: str, name: str, dir_fd: int | None, size: int
 ) -> MaterializationResult:
@@ -338,19 +364,12 @@ def _commit_temp(
         if candidate != name and params.quota.validate_target is not None:
             params.quota.validate_target(target)
         try:
-            os.link(
-                temp,
-                candidate,
-                src_dir_fd=dir_fd,
-                dst_dir_fd=dir_fd,
-                follow_symlinks=False,
-            )
+            publish_exclusive(temp, candidate, dir_fd)
         except FileExistsError:
             if params.overwrite != OverwritePolicy.RENAME:
                 raise
             counter += 1
-            suffix = "".join(Path(name).suffixes)
-            stem = name[: -len(suffix)] if suffix else name
+            stem, suffix = os.path.splitext(name)
             candidate = f"{stem}.{counter}{suffix}"
         else:
             target = Path(params.targetpath).with_name(os.path.basename(candidate))

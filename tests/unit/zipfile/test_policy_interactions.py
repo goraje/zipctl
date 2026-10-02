@@ -67,17 +67,19 @@ def test_policy_construction_and_json_normalize_equally() -> None:
         ExtractPolicy(max_compression_ratio=float("nan"))
 
 
-def test_filesystem_without_hardlinks_fails_without_clobber(
+def test_filesystem_without_hardlinks_still_never_clobbers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def unsupported(*_args: object, **_kwargs: object) -> None:
         raise OSError("hard links unavailable")
 
     monkeypatch.setattr(os, "link", unsupported)
+    (tmp_path / "file.txt").write_bytes(b"original")
     with ZipFile(io.BytesIO(archive_bytes())) as archive:
         with pytest.raises(ExtractionError):
             archive.extractall(tmp_path, policy=ExtractPolicy())
-    assert list(tmp_path.iterdir()) == []
+    assert [p.name for p in tmp_path.iterdir()] == ["file.txt"]
+    assert (tmp_path / "file.txt").read_bytes() == b"original"
 
 
 def test_interrupted_extraction_cleans_partial_file(tmp_path: Path) -> None:

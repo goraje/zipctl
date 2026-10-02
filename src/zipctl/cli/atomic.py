@@ -6,10 +6,11 @@ import os
 import secrets
 import shutil
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 from zipctl.cli.errors import CliError, os_error_text
 from zipctl.cli.output import printable
+from zipctl.zipfile.materialize import publish_exclusive
 
 __all__ = ["replacing"]
 
@@ -62,8 +63,9 @@ def replacing(path: str, *, overwrite: bool, seed: bool = False) -> Generator[st
             if overwrite:
                 os.replace(scratch, target)
             else:
-                os.link(scratch, target)
-                os.unlink(scratch)
+                publish_exclusive(scratch, target, None)
+                with suppress(FileNotFoundError):  # gone if it was moved, not linked
+                    os.unlink(scratch)
         except FileExistsError:
             raise CliError(f"{printable(path)} already exists") from None
         except OSError as exc:

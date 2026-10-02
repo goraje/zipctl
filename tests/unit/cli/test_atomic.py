@@ -175,3 +175,35 @@ def test_a_directory_that_cannot_be_synced_is_not_an_error(
     with replacing(str(tmp_path / "out.zip"), overwrite=False) as scratch:
         Path(scratch).write_bytes(b"done")
     assert (tmp_path / "out.zip").read_bytes() == b"done"
+
+
+def _no_hard_links(*_args: object, **_kwargs: object) -> None:
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_filesystem_without_hard_links_still_publishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os, "link", _no_hard_links)
+    target = tmp_path / "out.zip"
+    with replacing(str(target), overwrite=False) as scratch:
+        Path(scratch).write_bytes(b"done")
+    assert target.read_bytes() == b"done"
+    assert leftovers(tmp_path) == []
+
+
+def test_filesystem_without_hard_links_never_clobbers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os, "link", _no_hard_links)
+    target = tmp_path / "out.zip"
+
+    def publish_while_another_file_appears() -> None:
+        with replacing(str(target), overwrite=False) as scratch:
+            Path(scratch).write_bytes(b"new")
+            target.write_bytes(b"raced")  # appears after the up-front check
+
+    with pytest.raises(CliError, match="already exists"):
+        publish_while_another_file_appears()
+    assert target.read_bytes() == b"raced"
+    assert leftovers(tmp_path) == []
