@@ -15,6 +15,8 @@ from pathlib import Path
 
 from typing_extensions import Self
 
+from zipctl.zipfile.exceptions import ExtractionSecurityError
+
 
 class SecureExtractionRoot:
     """Create extraction parents without following existing symlink components."""
@@ -73,7 +75,7 @@ class SecureExtractionRoot:
                     )
                 except OSError as exc:
                     if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-                        raise ValueError(
+                        raise ExtractionSecurityError(
                             "Refusing to traverse unsafe extraction path"
                         ) from exc
                     raise
@@ -93,7 +95,9 @@ class SecureExtractionRoot:
                 or _is_reparse_point(current)
                 or (current.exists() and not current.is_dir())
             ):
-                raise ValueError("Refusing to traverse unsafe extraction path")
+                raise ExtractionSecurityError(
+                    "Refusing to traverse unsafe extraction path"
+                )
             _make_directory(current, str(current), None, created)
 
 
@@ -134,7 +138,7 @@ def _parts_below(path: str, root: str) -> tuple[str, ...]:
         )
         if os.pardir not in parts:
             return parts
-    raise ValueError("Refusing to extract outside the destination")
+    raise ExtractionSecurityError("Refusing to extract outside the destination")
 
 
 def open_secure_parent(
@@ -153,7 +157,8 @@ def open_secure_parent(
     through the caller's own leaf write.
 
     Raises:
-        ValueError: If *path* is outside *root* or crosses a symlink or file.
+        ExtractionSecurityError: If *path* is outside *root* or crosses a
+            symlink or file.
     """
     parts = _parts_below(path, root)
     with SecureExtractionRoot(Path(os.path.realpath(root))) as secure_root:

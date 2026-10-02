@@ -224,7 +224,7 @@ def test_symlink_below_destination_is_refused(tmp_path: Path) -> None:
     dest = tmp_path / "dest"
     dest.mkdir()
     (dest / "sub").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError, match="unsafe extraction path"):
+    with pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
         materialize_member(
             _member("sub/f.txt"),
             str(dest / "sub" / "f.txt"),
@@ -236,7 +236,7 @@ def test_symlink_below_destination_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.usefixtures("mode")
 def test_target_outside_destination_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="outside the destination"):
+    with pytest.raises(ExtractionSecurityError, match="outside the destination"):
         materialize_member(
             _member("f.txt"),
             str(tmp_path / "other" / "f.txt"),

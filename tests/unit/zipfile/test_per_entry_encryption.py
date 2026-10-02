@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,3 +59,11 @@ def test_inherit_encryption_sentinel_is_explicit(tmp_path: Path) -> None:
     with zipctl.ZipFile(archive) as zf:
         zf.setpassword(b"password")
         assert zf.read("inherited.txt") == b"payload"
+
+
+@pytest.mark.parametrize("encryption", [zipctl.ZIP_CRYPTO, zipctl.WZ_AES])
+def test_empty_entry_password_is_rejected(encryption: str) -> None:
+    with zipctl.ZipFile(io.BytesIO(), "w", encryption=encryption) as zf:
+        with pytest.raises(ValueError, match="non-empty password"):
+            zf.writestr("x", b"y", password=b"")
+        assert zf.namelist() == []

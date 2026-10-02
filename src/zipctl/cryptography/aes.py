@@ -422,17 +422,16 @@ class AesZipEncryptor(BaseZipEncryptor):
                 version negotiation. Defaults to ``None``.
 
         Raises:
-            RuntimeError: If *pwd* is empty.
-            RuntimeError: If *nbits* is not 128, 192, or 256.
+            ValueError: If *pwd* is empty, *nbits* is not 128, 192 or 256, or
+                *force_wz_aes_version* is not ``None``, 1 or 2.
         """
         if isinstance(pwd, str):
             pwd = pwd.encode("utf-8")
 
         if not pwd:
-            raise RuntimeError("%s encryption requires a password." % WZ_AES)
-
+            raise ValueError(f"{WZ_AES} encryption requires a non-empty password")
         if nbits not in (128, 192, 256):
-            raise RuntimeError("`nbits` must be one of 128, 192, 256. Got '%s'" % nbits)
+            raise ValueError(f"nbits must be 128, 192 or 256, not {nbits!r}")
         if force_wz_aes_version not in (None, WZ_AES_V1, WZ_AES_V2):
             raise ValueError("force_wz_aes_version must be 1 or 2")
 

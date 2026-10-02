@@ -115,6 +115,7 @@ def extract_members_with_policy(
                     else policy.overwrite_policy
                 ),
                 reporter=reporter,
+                plain=False,
             ),
             reporter,
         )
@@ -131,6 +132,7 @@ def extract_member(
     fsync: bool = True,
     reporter: ProgressReporter | None = None,
     overwrite: OverwritePolicy = OverwritePolicy.REPLACE,
+    plain: bool = True,
 ) -> MaterializationResult:
     """Extract *member* to *targetpath* and return the materialization result.
 
@@ -143,6 +145,9 @@ def extract_member(
             :class:`~zipctl.zipfile.info.ZipInfo` instance.
         destination: Root directory under which the member is extracted.
         pwd: Decryption password, or ``None``.
+        plain: Write symlink and special-file members as regular files, as
+            the standard library does; policy extraction passes ``False`` and
+            decides about them with ``allow_symlinks``/``allow_special_files``.
 
     Returns:
         The :class:`~zipctl.zipfile.materialize.MaterializationResult`
@@ -175,4 +180,5 @@ def extract_member(
         fsync=fsync,
         reporter=reporter,
         overwrite=overwrite,
+        plain=plain,
     )

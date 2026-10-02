@@ -101,7 +101,11 @@ def test_symlinks_and_directories_have_no_byte_progress(
         zf.writestr(link, b"target.txt")
     events: list[ProgressEvent] = []
     with zipctl.ZipFile(io.BytesIO(buffer.getvalue())) as zf:
-        zf.extractall(tmp_path, progress=events.append)
+        zf.extractall(
+            tmp_path,
+            progress=events.append,
+            policy=zipctl.ExtractPolicy(allow_symlinks=True),
+        )
     assert {e.phase for e in events} == {START, FINISH}
 
 

@@ -183,7 +183,12 @@ class ZipCryptoEncryptor(BaseZipEncryptor):
 
         Args:
             pwd (bytes): Encryption password as raw bytes.
+
+        Raises:
+            ValueError: If *pwd* is empty.
         """
+        if not pwd:
+            raise ValueError(f"{ZIP_CRYPTO} encryption requires a non-empty password")
         self._state: _ZipCryptoState = _ZipCryptoState(pwd)
 
         self._zinfo: ZipInfo | None = None

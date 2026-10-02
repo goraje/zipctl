@@ -16,7 +16,10 @@ import zipctl
 from tests.helpers import NonSeekableBytesIO
 from zipctl.compression import lzma, registry
 from zipctl.exceptions import BadZipFile, LargeZipFile
-from zipctl.zipfile.exceptions import ExtractionMaterializationError
+from zipctl.zipfile.exceptions import (
+    ExtractionMaterializationError,
+    ExtractionSecurityError,
+)
 from zipctl.zipfile.ext import ZipExtFile
 from zipctl.zipfile.file import ZipFileExtra
 from zipctl.zipfile.info import ZipInfo
@@ -319,7 +322,7 @@ def test_extract_refuses_symlinked_intermediate_directory(tmp_path: Path) -> Non
     (dest / "sub").symlink_to(outside, target_is_directory=True)
 
     with zipctl.ZipFile(archive) as zf:
-        with pytest.raises(ValueError, match="unsafe extraction path"):
+        with pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
             zf.extractall(dest)
     assert list(outside.iterdir()) == []
 

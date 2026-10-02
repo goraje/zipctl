@@ -124,19 +124,19 @@ class TestAesZipEncryptor:
         assert len(enc.salt) == 16
 
     def test_empty_bytes_password_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="encryption requires a password"):
+        with pytest.raises(ValueError, match="requires a non-empty password"):
             AesZipEncryptor(b"")
 
     def test_empty_string_password_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="encryption requires a password"):
+        with pytest.raises(ValueError, match="requires a non-empty password"):
             AesZipEncryptor("")
 
     def test_invalid_nbits_64_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="nbits"):
+        with pytest.raises(ValueError, match="nbits"):
             AesZipEncryptor(b"pass", nbits=64)
 
     def test_invalid_nbits_512_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="nbits"):
+        with pytest.raises(ValueError, match="nbits"):
             AesZipEncryptor(b"pass", nbits=512)
 
     def test_encrypt_preserves_length(self) -> None:

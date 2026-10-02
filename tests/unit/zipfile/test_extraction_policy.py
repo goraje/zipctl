@@ -291,7 +291,7 @@ def test_extract_policy_rule_overrides_default_violation_action(tmp_path: Path) 
     assert actions_by_code["parent_traversal"] == zipctl.ViolationAction.ERROR
 
 
-def test_plain_extract_symlink_escape_raises_security_error(tmp_path: Path) -> None:
+def test_plain_extract_writes_symlink_member_as_regular_file(tmp_path: Path) -> None:
     archive = tmp_path / "symlink-escape.zip"
     link = ZipInfo("link")
     link.external_attr = (stat.S_IFLNK | 0o777) << 16
@@ -299,22 +299,39 @@ def test_plain_extract_symlink_escape_raises_security_error(tmp_path: Path) -> N
         zf.writestr(link, "../outside")
 
     with zipctl.ZipFile(archive) as zf:
-        with pytest.raises(zipctl.ExtractionSecurityError):
-            zf.extract("link", tmp_path / "out")
+        zf.extract("link", tmp_path / "out")
+    extracted = tmp_path / "out" / "link"
+    assert not extracted.is_symlink()
+    assert extracted.read_text() == "../outside"
 
 
-def test_plain_extract_unsupported_special_file_raises_materialization_error(
-    tmp_path: Path,
+@pytest.mark.parametrize("kind", [stat.S_IFCHR, stat.S_IFIFO])
+def test_plain_extract_writes_special_member_as_regular_file(
+    tmp_path: Path, kind: int
 ) -> None:
     archive = tmp_path / "special-file.zip"
     device = ZipInfo("device")
-    device.external_attr = stat.S_IFCHR << 16
+    device.external_attr = (kind | 0o644) << 16
     with zipctl.ZipFile(archive, "w") as zf:
         zf.writestr(device, b"")
 
     with zipctl.ZipFile(archive) as zf:
-        with pytest.raises(zipctl.ExtractionMaterializationError):
-            zf.extract("device", tmp_path / "out")
+        zf.extract("device", tmp_path / "out")
+    assert (tmp_path / "out" / "device").is_file()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX umask")
+def test_plain_extract_honours_umask(tmp_path: Path) -> None:
+    archive = tmp_path / "mode.zip"
+    with zipctl.ZipFile(archive, "w") as zf:
+        zf.writestr("f.txt", b"x")
+    previous = os.umask(0o022)
+    try:
+        with zipctl.ZipFile(archive) as zf:
+            zf.extract("f.txt", tmp_path / "out")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE((tmp_path / "out" / "f.txt").stat().st_mode) == 0o644
 
 
 def test_extract_policy_marks_overwritten_members(tmp_path: Path) -> None:

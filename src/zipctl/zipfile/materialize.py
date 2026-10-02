@@ -13,7 +13,6 @@ import os
 import secrets
 import shutil
 import stat
-import tempfile
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -158,13 +157,18 @@ def _leaf_reference(
     return params.targetpath, None
 
 
-def _open_unique_temp_fd(dir_fd: int) -> tuple[str, int]:
-    """Create a uniquely named temp file relative to *dir_fd*; return (name, fd)."""
+def _open_unique_temp(directory: str, dir_fd: int | None) -> tuple[str, int]:
+    """Create a uniquely named temp file; return its name and descriptor.
+
+    The name is relative to *dir_fd* when one is given, else a path inside
+    *directory*.  Mode ``0o666`` lets the umask decide the final permissions,
+    as for any file a program creates.
+    """
     for _ in range(100):
-        name = f"{_TEMP_PREFIX}{secrets.token_hex(8)}"
+        name = _temporary_name(directory, dir_fd)
         try:
             fd = os.open(
-                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=dir_fd
+                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666, dir_fd=dir_fd
             )
         except FileExistsError:
             continue
@@ -214,6 +218,8 @@ def materialize_symlink(params: MaterializeParams) -> MaterializationResult:
     if len(payload) > 65536:
         raise ExtractionSecurityError("Symlink target is too long")
     link_target = os.fsdecode(payload)
+    if "\0" in link_target:
+        raise ExtractionSecurityError("Symlink target contains a NUL byte")
     if os.path.isabs(link_target) or has_parent_component(link_target):
         raise ExtractionSecurityError(
             "Refusing to create symlink outside extraction root"
@@ -224,7 +230,7 @@ def materialize_symlink(params: MaterializeParams) -> MaterializationResult:
             "Refusing to create symlink outside extraction root"
         )
     name, dir_fd = _leaf_reference(params, os.symlink, os.link, os.rename, os.unlink)
-    temp = _temporary_name(params, dir_fd)
+    temp = _temporary_name(params.directory, dir_fd)
     os.symlink(link_target, temp, dir_fd=dir_fd)
     try:
         return _commit_temp(params, temp, name, dir_fd, 0)
@@ -237,7 +243,7 @@ def materialize_special(params: MaterializeParams) -> MaterializationResult:
     member = params.member
     if stat.S_ISFIFO(entry_mode(member)) and hasattr(os, "mkfifo"):
         name, dir_fd = _leaf_reference(params, os.mkfifo, os.link, os.rename, os.unlink)
-        temp = _temporary_name(params, dir_fd)
+        temp = _temporary_name(params.directory, dir_fd)
         os.mkfifo(temp, stat.S_IMODE(member.external_attr >> 16), dir_fd=dir_fd)
         try:
             return _commit_temp(params, temp, name, dir_fd, 0)
@@ -262,49 +268,28 @@ def materialize_regular_file(params: MaterializeParams) -> MaterializationResult
         raise ExtractionMaterializationError(
             "Refusing to replace an existing directory with a file"
         )
-    if dir_fd is not None:
-        return _write_via_descriptor(params, name, dir_fd)
-    return _write_via_path(params)
-
-
-def _write_via_descriptor(
-    params: MaterializeParams, name: str, dir_fd: int
-) -> MaterializationResult:
     temp_name: str | None = None
     try:
-        temp_name, fd = _open_unique_temp_fd(dir_fd)
+        temp_name, fd = _open_unique_temp(params.directory, dir_fd)
         with os.fdopen(fd, "wb") as target:
             bytes_written = _copy_payload(params, target)
         return _commit_temp(params, temp_name, name, dir_fd, bytes_written)
     finally:
         if temp_name is not None:
-            try:
+            with suppress(FileNotFoundError):
                 os.unlink(temp_name, dir_fd=dir_fd)
-            except FileNotFoundError:
-                pass
 
 
-def _write_via_path(params: MaterializeParams) -> MaterializationResult:
-    temp_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", dir=params.directory, prefix=_TEMP_PREFIX, delete=False
-        ) as target:
-            temp_name = target.name
-            bytes_written = _copy_payload(params, target)
-        return _commit_temp(params, temp_name, params.targetpath, None, bytes_written)
-    finally:
-        if temp_name is not None:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
+def select_materializer(member: ZipInfo, *, plain: bool = False) -> Materializer:
+    """Return the materializer matching *member*'s entry type.
 
-
-def select_materializer(member: ZipInfo) -> Materializer:
-    """Return the materializer matching *member*'s entry type."""
+    *plain* writes symlink and special-file members as regular files holding
+    their payload, as the standard library's ``zipfile`` does.
+    """
     if member.is_dir():
         return materialize_directory
+    if plain:
+        return materialize_regular_file
     mode = entry_mode(member)
     if stat.S_ISLNK(mode):
         return materialize_symlink
@@ -313,9 +298,9 @@ def select_materializer(member: ZipInfo) -> Materializer:
     return materialize_regular_file
 
 
-def _temporary_name(params: MaterializeParams, dir_fd: int | None) -> str:
+def _temporary_name(directory: str, dir_fd: int | None) -> str:
     name = f"{_TEMP_PREFIX}{secrets.token_hex(16)}"
-    return name if dir_fd is not None else os.path.join(params.directory, name)
+    return name if dir_fd is not None else os.path.join(directory, name)
 
 
 def publish_exclusive(temp: str, name: str, dir_fd: int | None) -> None:
@@ -386,12 +371,14 @@ def materialize_member(
     fsync: bool = True,
     reporter: ProgressReporter | None = None,
     overwrite: OverwritePolicy = OverwritePolicy.REPLACE,
+    plain: bool = False,
 ) -> MaterializationResult:
     """Create the filesystem object for *member* at *targetpath* below *root*.
 
     Missing parent directories are created without following symlinks
     beneath *root*.  Regular files are fsynced before being moved into place
-    unless *fsync* is ``False``.
+    unless *fsync* is ``False``.  *plain* is passed to
+    :func:`select_materializer`.
     """
     parent = os.path.dirname(targetpath)
     dir_fd = (
@@ -412,7 +399,7 @@ def materialize_member(
             root,
             overwrite,
         )
-        return select_materializer(member)(params)
+        return select_materializer(member, plain=plain)(params)
     finally:
         if dir_fd is not None:
             os.close(dir_fd)

@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 
+from zipctl.zipfile.exceptions import ExtractionSecurityError
 from zipctl.zipfile.secure_fs import SecureExtractionRoot
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="requires dir_fd support")
@@ -77,7 +78,7 @@ def test_ensure_parents_refuses_symlink_component(root: SecureExtractionRoot) ->
     outside.mkdir()
     root.path.mkdir()
     (root.path / "link").symlink_to(outside, target_is_directory=True)
-    with root, pytest.raises(ValueError, match="unsafe extraction path"):
+    with root, pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
         root.ensure_parents(("link", "child"))
     assert list(outside.iterdir()) == []
 
@@ -88,7 +89,7 @@ def test_ensure_parents_refuses_dangling_symlink_component(
 ) -> None:
     root.path.mkdir()
     (root.path / "link").symlink_to(root.path.parent / "missing")
-    with root, pytest.raises(ValueError, match="unsafe extraction path"):
+    with root, pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
         root.ensure_parents(("link",))
     assert not (root.path.parent / "missing").exists()
 
@@ -96,7 +97,7 @@ def test_ensure_parents_refuses_dangling_symlink_component(
 def test_ensure_parents_refuses_file_component(root: SecureExtractionRoot) -> None:
     root.path.mkdir()
     (root.path / "file").write_text("x")
-    with root, pytest.raises(ValueError, match="unsafe extraction path"):
+    with root, pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
         root.ensure_parents(("file", "child"))
 
 
@@ -108,6 +109,6 @@ def test_descriptor_closed_after_ensure_parents_failure(
     (tmp_path / "root").mkdir()
     (tmp_path / "root" / "file").write_text("x")
     before = len(os.listdir("/dev/fd"))
-    with root, pytest.raises(ValueError, match="unsafe extraction path"):
+    with root, pytest.raises(ExtractionSecurityError, match="unsafe extraction path"):
         root.ensure_parents(("file",))
     assert len(os.listdir("/dev/fd")) == before

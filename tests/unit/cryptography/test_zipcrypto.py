@@ -84,20 +84,24 @@ class TestGenCrc:
 
 
 class TestZipCryptoEncryptor:
+    def test_empty_password_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-empty password"):
+            ZipCryptoEncryptor(b"")
+
     def test_initial_key_state_with_empty_password(self) -> None:
-        enc = ZipCryptoEncryptor(b"")
-        assert enc._state.key0 == 305419896
-        assert enc._state.key1 == 591751049
-        assert enc._state.key2 == 878082192
+        state = _ZipCryptoState(b"")
+        assert state.key0 == 305419896
+        assert state.key1 == 591751049
+        assert state.key2 == 878082192
 
     def test_password_changes_key_state(self) -> None:
-        empty = ZipCryptoEncryptor(b"")
-        with_pwd = ZipCryptoEncryptor(b"password")
+        empty = _ZipCryptoState(b"")
+        with_pwd = ZipCryptoEncryptor(b"password")._state
         # At least one key must differ
         assert (
-            empty._state.key0 != with_pwd._state.key0
-            or empty._state.key1 != with_pwd._state.key1
-            or empty._state.key2 != with_pwd._state.key2
+            empty.key0 != with_pwd.key0
+            or empty.key1 != with_pwd.key1
+            or empty.key2 != with_pwd.key2
         )
 
     def test_same_passwords_produce_same_key_state(self) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -395,6 +396,40 @@ def test_no_policy_neutralises_traversal_but_applies_no_limits(
     assert set(os.listdir(workdir)) == before | {"dest"}
     assert tree(dest) == {"escape.txt": b"x", "ok.txt": b"y"}
     assert result.stdout == f"Extracted to {dest}: 2 members\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file types")
+def test_no_policy_writes_links_and_pipes_as_regular_files(
+    cli: CliRunner, workdir: Path
+) -> None:
+    link = zipctl.ZipInfo("link")
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    pipe = zipctl.ZipInfo("pipe")
+    pipe.external_attr = (stat.S_IFIFO | 0o644) << 16
+    archive = workdir / "t.zip"
+    with ZipFile(archive, "w") as zf:
+        zf.writestr(link, b"target")
+        zf.writestr(pipe, b"")
+    dest = workdir / "dest"
+    result = cli("extract", "--no-policy", str(archive), "-d", str(dest))
+    assert result.returncode == 0, result
+    assert not (dest / "link").is_symlink()
+    assert (dest / "pipe").is_file()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires symlinks")
+def test_no_policy_reports_an_unsafe_parent_as_an_extraction_error(
+    cli: CliRunner, workdir: Path
+) -> None:
+    archive = write_archive(workdir / "t.zip", [("a/b", b"x")])
+    dest = workdir / "dest"
+    dest.mkdir()
+    (dest / "a").symlink_to(workdir)
+    result = cli("extract", "--no-policy", str(archive), "-d", str(dest))
+    assert result.returncode == 1, result
+    assert result.stderr == (
+        "zipctl: error: cannot extract: Refusing to traverse unsafe extraction path\n"
+    )
 
 
 def test_a_compression_bomb_is_refused_by_default(

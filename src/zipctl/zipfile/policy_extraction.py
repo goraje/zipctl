@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from zipctl.exceptions import BadZipFile
+from zipctl.exceptions import BadZipFile, PasswordError
 from zipctl.zipfile.assessment import ExtractionContext, ValidationState
 from zipctl.zipfile.assessor import assess_member, entry_count_violation
 from zipctl.zipfile.exceptions import ExtractionFailure, ExtractionQuotaExceeded
@@ -37,11 +37,12 @@ Materialize = Callable[
     [ZipInfo, Path, ExtractionQuota, ProgressReporter | None], MaterializationResult
 ]
 
+# What one member's extraction can fail with; anything else is not about the
+# member (a missing codec backend, a resource budget, a bug) and propagates.
 _MATERIALIZATION_ERRORS = (
     OSError,
-    ValueError,
     BadZipFile,
-    RuntimeError,
+    PasswordError,
     ExtractionFailure,
 )
 
