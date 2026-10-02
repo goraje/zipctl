@@ -22,7 +22,7 @@ from zipctl.cryptography import (
 )
 from zipctl.cryptography.aes import EXTRA_WZ_AES, WZ_AES_COMPRESS_TYPE
 from zipctl.exceptions import LargeZipFile
-from zipctl.zipfile.info.extra import EXTRA_ZIP64, _Extra
+from zipctl.zipfile.info.extra import EXTRA_ZIP64, Extra
 from zipctl.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,
     CENTRAL_DIR_STRUCT,
@@ -128,7 +128,7 @@ def zip64_central_extra(
     else:
         zip64_extra = b""
     # Preserve existing extra data, stripping any old ZIP64 entry first
-    existing_extra = _Extra.strip(info.extra, (EXTRA_ZIP64, EXTRA_WZ_AES))
+    existing_extra = Extra.strip(info.extra, (EXTRA_ZIP64, EXTRA_WZ_AES))
     extra_data = zip64_extra + existing_extra
     return extra_data, file_size, compress_size, header_offset, min_version
 

@@ -230,7 +230,7 @@ class ZipExtFile(io.BufferedIOBase):
         self._fileobj.seek(self._compress_start)
         self._init_read_state()
         if self._decrypter is not None and self._decrypter.authenticates_ciphertext:
-            for _ in self._raw_chunks():
+            for _ in self.raw_chunks():
                 pass
             self._eof = True
             self._left = 0
@@ -238,7 +238,7 @@ class ZipExtFile(io.BufferedIOBase):
             while self.read(self.MAX_READ_SIZE):
                 pass
 
-    def _raw_chunks(self) -> Iterator[bytes]:
+    def raw_chunks(self) -> Iterator[bytes]:
         """Yield the entry's decrypted but still compressed bytes, to the end.
 
         For copying an entry into another archive without compressing it

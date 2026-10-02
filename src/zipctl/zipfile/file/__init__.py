@@ -1,19 +1,11 @@
 """The :class:`ZipFile` archive class and the :func:`is_zipfile` helper."""
 
-# Friend access inside the zipfile package (ruff exempts it via SLF001).
-# pyright: reportPrivateUsage=false
-# Import cycle through write.py, which only imports ZipFile to annotate it.
-# pyright: reportImportCycles=false
-
 from __future__ import annotations
 
 import os
 import shutil
-import threading
 import warnings
-from collections.abc import (
-    Iterable,
-)
+from collections.abc import Iterable
 from functools import partial
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Literal, TypeAlias, cast, overload
@@ -36,16 +28,7 @@ from zipctl.compression import (
     Registry,
     registry,
 )
-from zipctl.cryptography import WZ_AES, ZIP_CRYPTO
-from zipctl.cryptography.aes import (
-    AesKeyCache,
-    AesZipEncryptor,
-)
-from zipctl.cryptography.zipcrypto import ZipCryptoEncryptor
-from zipctl.exceptions import (
-    BadZipFile,
-    PasswordRequired,
-)
+from zipctl.exceptions import BadZipFile
 from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.assessment import (
     ArchiveAssessment,
@@ -60,10 +43,13 @@ from zipctl.zipfile.extract import (
     ExtractPolicy,
     ExtractResult,
 )
+from zipctl.zipfile.file.directory import CentralDirectory
 from zipctl.zipfile.file.encryption import (
     INHERIT_ENCRYPTION,
     EncryptionOverride,
+    EncryptionSettings,
     ZipFileExtra,
+    require_bytes,
 )
 from zipctl.zipfile.file.extraction import (
     PasswordProvider,
@@ -71,17 +57,10 @@ from zipctl.zipfile.file.extraction import (
     extract_member,
     extract_members_with_policy,
 )
-from zipctl.zipfile.file.lifecycle import (
-    close_archive,
-    open_archive_file,
-    start_appending,
-    start_new_archive,
-)
-from zipctl.zipfile.file.reading import open_to_read
-from zipctl.zipfile.file.writing import copy_raw, open_to_write
-from zipctl.zipfile.info import (
-    ZipInfo,
-)
+from zipctl.zipfile.file.reader import ArchiveReader
+from zipctl.zipfile.file.stream import ArchiveStream
+from zipctl.zipfile.file.writer import ArchiveWriter
+from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.inspection import (
     InspectionMember,
     InspectionResult,
@@ -95,17 +74,12 @@ from zipctl.zipfile.password import (
 from zipctl.zipfile.progress import (
     ProgressCallback,
 )
-from zipctl.zipfile.records import (
-    looks_like_zip,
-    read_directory,
-)
+from zipctl.zipfile.records import looks_like_zip
 from zipctl.zipfile.shared import (
     ZIP_MAX_COMMENT,
     ReadWriteMode,
     StrPath,
 )
-from zipctl.zipfile.write import ZipWriteFile
-from zipctl.zipfile.write_coordinator import WriteCoordinator
 
 __all__ = [
     "ZipFile",
@@ -118,9 +92,6 @@ __all__ = [
     "InspectionResult",
 ]
 
-# ---------------------------------------------------------------------------
-# Type aliases
-# ---------------------------------------------------------------------------
 _ZipFileMode: TypeAlias = Literal["r", "w", "x", "a"]
 
 
@@ -158,6 +129,12 @@ class ZipFile:
     optional WinZip AES (``WZ_AES``) and traditional ZIP encryption
     (``ZIP_CRYPTO``), ZIP64 extensions, and archive comments.
 
+    The work is shared out: an :class:`ArchiveStream` owns the file, a
+    :class:`CentralDirectory` the entries, :class:`EncryptionSettings` the
+    defaults for encryption, an :class:`ArchiveReader` opens members to read
+    and an :class:`ArchiveWriter` adds them.  This class keeps the
+    ``zipfile``-compatible surface over them.
+
     Attributes:
         fp: The underlying binary file object, or ``None`` when closed.
         debug: Verbosity level for diagnostic output (0–3).
@@ -173,8 +150,6 @@ class ZipFile:
         metadata_encoding: Encoding used to decode non-UTF-8 filenames on
             read. ``None`` defaults to ``'cp437'``.
     """
-
-    fp: IO[bytes] | None = None
 
     def __init__(
         self,
@@ -223,66 +198,117 @@ class ZipFile:
         """
         if mode not in ("r", "w", "x", "a"):
             raise ValueError("ZipFile requires mode 'r', 'w', 'x', or 'a'")  # pyright: ignore[reportUnreachable]
-
-        selected_registry = (
-            compression_registry.copy() if compression_registry else registry.copy()
-        )
+        if metadata_encoding and mode != "r":
+            raise ValueError("metadata_encoding is only supported for reading files")
+        selected_registry = (compression_registry or registry).copy()
         selected_registry.check_compression(compression)
 
-        self._allow_zip64: bool = allowZip64
-        self._did_modify: bool = False
         self.debug: int = 0
-        self.NameToInfo: dict[str, ZipInfo] = {}
-        self.filelist: list[ZipInfo] = []
         self.compression: int = compression
         self.compresslevel: int | None = compresslevel
         self.mode: _ZipFileMode = mode
-        self.pwd: bytes | None = None
-        self.encryption: str | None = encryption
-        self._wz_aes_nbits: int = extra.wz_aes_nbits if extra else 256
-        self._force_wz_aes_version: int | None = (
-            extra.force_wz_aes_version if extra else None
-        )
-        self._comment: bytes = b""
-        self._strict_timestamps: bool = strict_timestamps
         self.metadata_encoding: str | None = metadata_encoding
-
-        if self.metadata_encoding and mode != "r":
-            raise ValueError("metadata_encoding is only supported for reading files")
-
-        if isinstance(file, os.PathLike):
-            file = os.fspath(file)
-        if isinstance(file, str):
-            self._file_passed: bool = False
-            self.filename: str | None = file
-            self.fp = open_archive_file(file, mode)
-        else:
-            self._file_passed = True
-            self.fp = file
-            self.filename = getattr(file, "name", None)
-        self._file_ref_cnt: int = 1
-        self._lock: threading.RLock = threading.RLock()
-        self._write_coordinator: WriteCoordinator = WriteCoordinator(self._lock)
-        self._aes_keys: AesKeyCache = AesKeyCache()
-        self._seekable: bool = True
-        self.start_dir: int = 0
-        self._compression_registry: Registry = selected_registry
         self.limits: ArchiveLimits = limits or ArchiveLimits()
-        self._write_failed: bool = False
+        self._strict_timestamps: bool = strict_timestamps
 
+        self._stream: ArchiveStream = ArchiveStream(file, mode)
+        self._directory: CentralDirectory = CentralDirectory()
+        self._encryption: EncryptionSettings = EncryptionSettings(encryption, extra)
+        self._writer: ArchiveWriter = ArchiveWriter(
+            mode,
+            self._stream,
+            self._directory,
+            self._encryption,
+            selected_registry,
+            allow_zip64=allowZip64,
+        )
+        self._reader: ArchiveReader = ArchiveReader(
+            self._stream,
+            self._writer,
+            self._encryption,
+            selected_registry,
+            self.limits,
+            metadata_encoding,
+        )
         try:
-            if mode == "r":
-                self._read_directory()
-            elif mode in ("w", "x"):
-                start_new_archive(self)
-            elif mode == "a":
-                start_appending(self)
+            self._start(mode)
         except BaseException:
-            fp = self.fp
-            self.fp = None
-            assert fp is not None
-            self._fpclose(fp)
+            self._stream.close()
             raise
+
+    def _start(self, mode: _ZipFileMode) -> None:
+        """Read the directory, or position a new archive, as *mode* requires."""
+        fp = self._stream.require_open("open")
+        if mode == "r":
+            self._load_directory(fp)
+        elif mode in ("w", "x"):
+            self._directory.start_dir = self._stream.start_writing()
+            self._directory.modified = True
+        else:
+            try:
+                self._load_directory(fp)
+                fp.seek(self._directory.start_dir)
+            except BadZipFile:
+                # Not an archive: append one to whatever the file holds.
+                fp.seek(0, os.SEEK_END)
+                self._directory.start_dir = fp.tell()
+                self._directory.modified = True
+
+    def _load_directory(self, fp: IO[bytes]) -> None:
+        self._directory.load(fp, self.metadata_encoding, self.debug, self.limits)
+
+    # -- zipfile-compatible attributes, kept by the collaborators -------------
+
+    @property
+    def fp(self) -> IO[bytes] | None:
+        """The underlying binary file object, or ``None`` once closed."""
+        return self._stream.fp
+
+    @property
+    def filename(self) -> str | None:
+        """The archive's path, or its file object's ``name``."""
+        return self._stream.name
+
+    @filename.setter
+    def filename(self, name: str | None) -> None:
+        self._stream.name = name
+
+    @property
+    def filelist(self) -> list[ZipInfo]:
+        """Entries in central-directory order."""
+        return self._directory.infos
+
+    @property
+    def NameToInfo(self) -> dict[str, ZipInfo]:  # noqa: N802  # the zipfile name
+        """The last entry of each name."""
+        return self._directory.by_name
+
+    @property
+    def start_dir(self) -> int:
+        """Offset of the central directory (where the next entry goes)."""
+        return self._directory.start_dir
+
+    @start_dir.setter
+    def start_dir(self, offset: int) -> None:
+        self._directory.start_dir = offset
+
+    @property
+    def pwd(self) -> bytes | None:
+        """The default password, or ``None``; see :meth:`setpassword`."""
+        return self._encryption.password
+
+    @pwd.setter
+    def pwd(self, pwd: bytes | None) -> None:
+        self.setpassword(pwd)
+
+    @property
+    def encryption(self) -> str | None:
+        """Encryption for new entries (``WZ_AES``, ``ZIP_CRYPTO`` or ``None``)."""
+        return self._encryption.method
+
+    @encryption.setter
+    def encryption(self, method: str | None) -> None:
+        self._encryption.method = method
 
     def __enter__(self) -> Self:
         """Enter the runtime context and return this archive."""
@@ -311,33 +337,17 @@ class ZipFile:
             A string of the form ``<module.ZipFile filename=... mode=...>``
             or ``<module.ZipFile [closed]>`` when the archive is closed.
         """
-        result = ["<%s.%s" % (self.__class__.__module__, self.__class__.__qualname__)]
+        result = [f"<{self.__class__.__module__}.{self.__class__.__qualname__}"]
         if self.fp is not None:
-            if self._file_passed:
-                result.append(" file=%r" % self.fp)
+            if not self._stream.owned:
+                result.append(f" file={self.fp!r}")
             elif self.filename is not None:
-                result.append(" filename=%r" % self.filename)
-            result.append(" mode=%r" % self.mode)
+                result.append(f" filename={self.filename!r}")
+            result.append(f" mode={self.mode!r}")
         else:
             result.append(" [closed]")
         result.append(">")
         return "".join(result)
-
-    def _read_directory(self) -> None:
-        """Populate :attr:`filelist` and :attr:`NameToInfo` from the archive.
-
-        Raises:
-            BadZipFile: If the file is not a ZIP archive or its central
-                directory is truncated or corrupt.
-        """
-        assert self.fp is not None
-        directory = read_directory(
-            self.fp, self.metadata_encoding, self.debug, self.limits
-        )
-        self._comment = directory.comment
-        self.start_dir = directory.start_dir
-        self.filelist.extend(directory.infos)
-        self.NameToInfo.update((info.filename, info) for info in directory.infos)
 
     def namelist(self) -> list[str]:
         """Return a list of archive member names.
@@ -354,7 +364,7 @@ class ZipFile:
         Returns:
             The internal :attr:`filelist` in central-directory order.
         """
-        return self.filelist
+        return self._directory.infos
 
     def inspect(
         self,
@@ -384,10 +394,11 @@ class ZipFile:
         Args:
             file: Output stream. Defaults to ``sys.stdout`` when ``None``.
         """
-        print("%-46s %19s %12s" % ("File Name", "Modified    ", "Size"), file=file)
+        print(f"{'File Name':<46} {'Modified    ':>19} {'Size':>12}", file=file)
         for zinfo in self.filelist:
-            date = "%d-%02d-%02d %02d:%02d:%02d" % zinfo.date_time[:6]
-            print("%-46s %s %12d" % (zinfo.filename, date, zinfo.file_size), file=file)
+            year, month, day, hour, minute, second = zinfo.date_time[:6]
+            date = f"{year}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
+            print(f"{zinfo.filename:<46} {date} {zinfo.file_size:>12}", file=file)
 
     def check_password(
         self,
@@ -423,13 +434,11 @@ class ZipFile:
         """
         if pwd is None:
             pwd = self.pwd
-        if pwd is not None and not isinstance(pwd, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError("pwd: expected bytes, got %s" % type(pwd).__name__)  # pyright: ignore[reportUnreachable]
+        require_bytes("pwd", pwd)
         if not pwd:
             raise ValueError("check_password() requires a non-empty password")
-        if not self.fp:
-            raise ValueError("Attempt to use ZIP archive that was already closed")
-        self._write_coordinator.ensure_readable()
+        self._stream.require_open("use")
+        self._writer.ensure_idle("read from")
 
         infos = (
             self.filelist
@@ -441,7 +450,7 @@ class ZipFile:
                 MemberPasswordCheck(
                     info.filename,
                     check_member_password(
-                        partial(open_to_read, self, "r", info, pwd), info, full=full
+                        partial(self._reader.open, info, pwd), info, full=full
                     ),
                 )
                 for info in infos
@@ -450,6 +459,10 @@ class ZipFile:
 
     def testzip(self) -> str | None:
         """Verify each archive member by reading it and checking its CRC.
+
+        Like the standard library's, only a corrupt member counts as bad: a
+        member that cannot be opened at all (a missing or wrong password, an
+        unsupported method) raises instead.
 
         Returns:
             The filename of the first bad entry, or ``None`` if all entries
@@ -480,7 +493,7 @@ class ZipFile:
         """
         info = self.NameToInfo.get(name)
         if info is None:
-            raise KeyError("There is no item named %r in the archive" % name)
+            raise KeyError(f"There is no item named {name!r} in the archive")
         return info
 
     def setpassword(self, pwd: bytes | None) -> None:
@@ -492,12 +505,8 @@ class ZipFile:
         Raises:
             TypeError: If *pwd* is not ``bytes`` or ``None``.
         """
-        if pwd and not isinstance(pwd, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError("pwd: expected bytes, got %s" % type(pwd).__name__)  # pyright: ignore[reportUnreachable]
-        if pwd:
-            self.pwd = pwd
-        else:
-            self.pwd = None
+        require_bytes("pwd", pwd or None)
+        self._encryption.password = pwd or None
 
     def get_encryptor(
         self,
@@ -522,43 +531,32 @@ class ZipFile:
 
         Raises:
             PasswordRequired: If no password is available.
+            ValueError: If the password is empty.
             NotImplementedError: If the encryption scheme is unknown.
         """
-        method = self.encryption if encryption is None else encryption
-        pwd = self.pwd if password is None else password
-        if pwd is None:
-            raise PasswordRequired("Encrypted entries require a password")
-        if method == WZ_AES:
-            return AesZipEncryptor(
-                pwd,
-                nbits=self._wz_aes_nbits if nbits is None else nbits,
-                force_wz_aes_version=(
-                    self._force_wz_aes_version
-                    if force_wz_aes_version is None
-                    else force_wz_aes_version
-                ),
-            )
-        if method == ZIP_CRYPTO:
-            return ZipCryptoEncryptor(pwd)
-        raise NotImplementedError("Unknown encryption method: %r" % (method,))
+        return self._encryption.encryptor(
+            encryption,
+            password,
+            nbits=nbits,
+            force_wz_aes_version=force_wz_aes_version,
+        )
 
     @property
     def comment(self) -> bytes:
         """The archive-level comment bytes."""
-        return self._comment
+        return self._directory.comment
 
     @comment.setter
     def comment(self, comment: bytes) -> None:
-        if not isinstance(comment, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
-            raise TypeError("comment: expected bytes, got %s" % type(comment).__name__)  # pyright: ignore[reportUnreachable]
+        require_bytes("comment", comment)
         if len(comment) > ZIP_MAX_COMMENT:
             warnings.warn(
-                "Archive comment is too long; truncating to %d bytes" % ZIP_MAX_COMMENT,
+                f"Archive comment is too long; truncating to {ZIP_MAX_COMMENT} bytes",
                 stacklevel=2,
             )
             comment = comment[:ZIP_MAX_COMMENT]
-        self._comment = comment
-        self._did_modify = True
+        self._directory.comment = comment
+        self._directory.modified = True
 
     def read(self, name: str | ZipInfo, pwd: bytes | None = None) -> bytes:
         """Return the decompressed bytes for the archive member named *name*.
@@ -616,8 +614,7 @@ class ZipFile:
             raise ValueError('open() requires mode "r" or "w"')
         if pwd and (mode == "w"):
             raise ValueError("pwd is only supported for reading files")
-        if not self.fp:
-            raise ValueError("Attempt to use ZIP archive that was already closed")
+        self._stream.require_open("use")
 
         if isinstance(name, ZipInfo):
             zinfo = name
@@ -631,7 +628,7 @@ class ZipFile:
         if mode == "w":
             return cast(  # pyright: ignore[reportInvalidCast]  # file-like, not an IO subclass
                 IO[bytes],
-                self._open_to_write(
+                self._writer.open(
                     zinfo,
                     force_zip64=force_zip64,
                     encryption=encryption,
@@ -639,31 +636,7 @@ class ZipFile:
                     extra=extra,
                 ),
             )
-
-        self._write_coordinator.ensure_readable()
-
-        return cast(IO[bytes], open_to_read(self, mode, zinfo, pwd))  # pyright: ignore[reportInvalidCast]  # file-like, not an IO subclass
-
-    def _open_to_write(
-        self,
-        zinfo: ZipInfo,
-        force_zip64: bool = False,
-        *,
-        encryption: EncryptionOverride = INHERIT_ENCRYPTION,
-        password: bytes | None = None,
-        extra: ZipFileExtra | None = None,
-        raw: bool = False,
-    ) -> ZipWriteFile:
-        """Open *zinfo* for writing; see :func:`writing.open_to_write`."""
-        return open_to_write(
-            self,
-            zinfo,
-            force_zip64,
-            encryption=encryption,
-            password=password,
-            extra=extra,
-            raw=raw,
-        )
+        return cast(IO[bytes], self._reader.open(zinfo, pwd))  # pyright: ignore[reportInvalidCast]  # file-like, not an IO subclass
 
     def _copy_raw(
         self,
@@ -681,20 +654,19 @@ class ZipFile:
         """Copy a member of *source* here without recompressing it.
 
         Private, but a contract for zipctl's own copy commands (``encrypt``,
-        ``decrypt`` and ``rewrite``); see :func:`writing.copy_raw`.
+        ``decrypt`` and ``rewrite``); see :meth:`ArchiveWriter.copy_raw`.
         """
-        copy_raw(
-            self,
-            source,
-            info,
-            zinfo,
-            crc=crc,
-            size=size,
-            pwd=pwd,
-            encryption=encryption,
-            password=password,
-            extra=extra,
-        )
+        with source._reader.open(info, pwd) as reader:
+            self._writer.copy_raw(
+                reader,
+                info,
+                zinfo,
+                crc=crc,
+                size=size,
+                encryption=encryption,
+                password=password,
+                extra=extra,
+            )
 
     @overload
     def extract(
@@ -827,15 +799,6 @@ class ZipFile:
             extract_member(self, zipinfo, path, pwd)
         return None
 
-    def _mark_modified(self) -> None:
-        """Record that the central directory must be rewritten on close."""
-        self._did_modify = True
-
-    def _add_entry(self, zinfo: ZipInfo) -> None:
-        """Register a fully written entry in the in-memory directory."""
-        self.filelist.append(zinfo)
-        self.NameToInfo[zinfo.filename] = zinfo
-
     def write(
         self,
         filename: StrPath,
@@ -861,9 +824,8 @@ class ZipFile:
         Raises:
             ValueError: If the archive is closed or a write handle is open.
         """
-        if not self.fp:
-            raise ValueError("Attempt to write to ZIP archive that was already closed")
-        self._write_coordinator.ensure_writable()
+        self._stream.require_open("write to")
+        self._writer.ensure_idle("write to")
 
         zinfo = ZipInfo.from_file(
             filename, arcname, strict_timestamps=self._strict_timestamps
@@ -931,11 +893,10 @@ class ZipFile:
         if isinstance(zinfo_or_arcname, ZipInfo):
             zinfo = zinfo_or_arcname
         else:
-            zinfo = ZipInfo(zinfo_or_arcname)._for_archive(self)
+            zinfo = ZipInfo(zinfo_or_arcname)._for_archive(self)  # pyright: ignore[reportPrivateUsage]  # the zipfile hook for writestr defaults
 
-        if not self.fp:
-            raise ValueError("Attempt to write to ZIP archive that was already closed")
-        self._write_coordinator.ensure_writable()
+        self._stream.require_open("write to")
+        self._writer.ensure_idle("write to")
 
         if compress_type is not None:
             zinfo.compress_type = compress_type
@@ -944,7 +905,7 @@ class ZipFile:
             zinfo.compress_level = compresslevel
 
         zinfo.file_size = len(data)
-        with self._lock:
+        with self._stream.lock:
             with self.open(
                 zinfo,
                 mode="w",
@@ -1013,19 +974,12 @@ class ZipFile:
         Raises:
             ValueError: If a write handle is still open on the archive.
         """
-        if self.fp is None:
-            return
-        with self._lock:
-            close_archive(self)
-
-    def _fpclose(self, fp: IO[bytes]) -> None:
-        """Decrement the file reference count and close *fp* when it reaches zero.
-
-        Args:
-            fp: The binary file object to (conditionally) close.
-        """
-        with self._lock:
-            assert self._file_ref_cnt > 0
-            self._file_ref_cnt -= 1
-            if not self._file_ref_cnt and not self._file_passed:
-                fp.close()
+        with self._stream.lock:
+            if self._stream.fp is None:
+                return
+            self._writer.ensure_idle("close")
+            try:
+                self._writer.finish()
+            finally:
+                self._reader.close()
+                self._stream.close()

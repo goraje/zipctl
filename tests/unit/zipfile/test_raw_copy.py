@@ -70,7 +70,7 @@ def flip_data_byte(archive: bytes, offset: int) -> bytes:
 def payload(zf: ZipFile, pwd: bytes | None) -> bytes:
     """The compressed bytes of the only member, decrypted."""
     reader = cast(ZipExtFile, zf.open("f.bin", "r", pwd))  # pyright: ignore[reportInvalidCast]  # open() is typed IO[bytes]
-    return b"".join(reader._raw_chunks())
+    return b"".join(reader.raw_chunks())
 
 
 def copy(source: bytes, target: str, *, crc: int = CRC, size: int = DATA_SIZE) -> bytes:
@@ -174,11 +174,11 @@ def test_a_raw_entry_takes_raw_writes_only() -> None:
     with ZipFile(io.BytesIO(), "w") as zf:
         zinfo = ZipInfo("a")
         zinfo.file_size = zinfo.CRC = 0
-        raw = zf._open_to_write(zinfo, raw=True)
-        with pytest.raises(ValueError, match="_write_raw"):
+        raw = zf._writer.open(zinfo, raw=True)
+        with pytest.raises(ValueError, match="write_raw"):
             raw.write(b"x")
         raw.close()
-        plain = zf._open_to_write(ZipInfo("b"))
+        plain = zf._writer.open(ZipInfo("b"))
         with pytest.raises(ValueError, match="raw entry"):
-            plain._write_raw(b"x")
+            plain.write_raw(b"x")
         plain.close()

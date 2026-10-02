@@ -23,6 +23,7 @@ from tests.functional.cli.rewrite_support import (
 from zipctl import ZipFile
 from zipctl.cli import main
 from zipctl.zipfile.file import EncryptionOverride, ZipFileExtra
+from zipctl.zipfile.file.writer import ArchiveWriter
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.write import ZipWriteFile
 
@@ -33,8 +34,9 @@ Run = Callable[..., tuple[int, str, str]]
 
 
 class OpenToWriteOptions(TypedDict, total=False):
-    """The keyword-only parameters of ``ZipFile._open_to_write``."""
+    """The keyword-only parameters of ``ArchiveWriter.open``."""
 
+    force_zip64: bool
     encryption: EncryptionOverride
     password: bytes | None
     extra: ZipFileExtra | None
@@ -113,12 +115,12 @@ def test_data_of_a_different_length_is_caught_even_if_the_checksum_agrees(
 def test_compressed_data_that_is_copied_wrongly_is_caught_too(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = ZipWriteFile._write_raw
+    original = ZipWriteFile.write_raw
 
     def write_raw(self: ZipWriteFile, data: bytes) -> None:
         original(self, data[:-1] + bytes([data[-1] ^ 1]))
 
-    monkeypatch.setattr(ZipWriteFile, "_write_raw", write_raw)
+    monkeypatch.setattr(ZipWriteFile, "write_raw", write_raw)
     out = workdir / "out.zip"
     code, _, stderr = run("encrypt", str(source), str(out))
     assert code == 1, stderr
@@ -129,18 +131,15 @@ def test_compressed_data_that_is_copied_wrongly_is_caught_too(
 def test_compression_option_bits_that_are_not_carried_over_are_caught(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = ZipFile._open_to_write
+    original = ArchiveWriter.open
 
     def wrong_bits(
-        self: ZipFile,
-        zinfo: ZipInfo,
-        force_zip64: bool = False,
-        **kw: Unpack[OpenToWriteOptions],
+        self: ArchiveWriter, zinfo: ZipInfo, **kw: Unpack[OpenToWriteOptions]
     ) -> ZipWriteFile:
         zinfo.flag_bits ^= 0b010
-        return original(self, zinfo, force_zip64, **kw)
+        return original(self, zinfo, **kw)
 
-    monkeypatch.setattr(ZipFile, "_open_to_write", wrong_bits)
+    monkeypatch.setattr(ArchiveWriter, "open", wrong_bits)
     out = workdir / "out.zip"
     code, _, stderr = run("encrypt", str(source), str(out))
     assert code == 1
@@ -206,19 +205,16 @@ def test_a_long_list_of_problems_is_cut_short(
 def test_a_member_written_with_the_wrong_protection_is_caught(
     run: Run, workdir: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = ZipFile._open_to_write
+    original = ArchiveWriter.open
 
     def open_plain(
-        self: ZipFile,
-        zinfo: ZipInfo,
-        force_zip64: bool = False,
-        **kw: Unpack[OpenToWriteOptions],
+        self: ArchiveWriter, zinfo: ZipInfo, **kw: Unpack[OpenToWriteOptions]
     ) -> ZipWriteFile:
         kw["encryption"] = None
         kw["password"] = None
-        return original(self, zinfo, force_zip64, **kw)
+        return original(self, zinfo, **kw)
 
-    monkeypatch.setattr(ZipFile, "_open_to_write", open_plain)
+    monkeypatch.setattr(ArchiveWriter, "open", open_plain)
     out = workdir / "out.zip"
     code, _, stderr = run("encrypt", str(source), str(out))
     assert code == 1

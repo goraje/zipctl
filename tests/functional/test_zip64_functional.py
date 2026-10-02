@@ -18,7 +18,7 @@ import pytest
 from zipctl import ZipFile
 from zipctl.exceptions import LargeZipFile
 from zipctl.zipfile import records as records_mod
-from zipctl.zipfile.file import writing as file_mod
+from zipctl.zipfile.file import writer as file_mod
 from zipctl.zipfile.info import encoding as info_mod
 from zipctl.zipfile.shared import (
     CENTRAL_DIR_SIGNATURE,

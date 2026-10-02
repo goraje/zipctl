@@ -12,6 +12,7 @@ from typing_extensions import Buffer, override
 from zipctl import WZ_AES, ZIP_CRYPTO, ZipFile, ZipFileExtra
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.io_wrappers import write_all
+from zipctl.zipfile.write import ZipWriteFile
 
 
 class ShortWriter(io.BytesIO):
@@ -179,3 +180,40 @@ def test_invalid_write_counts_fail_instead_of_looping(count: int) -> None:
 
     with pytest.raises(OSError, match="Stream"):
         write_all(InvalidWriter(), b"payload")
+
+
+def test_archive_close_waits_for_a_member_that_is_finishing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finishing = threading.Event()
+    release = threading.Event()
+    original = ZipWriteFile._write_final_payload
+
+    def slow_final_payload(self: ZipWriteFile) -> None:
+        finishing.set()
+        assert release.wait(timeout=5)
+        original(self)
+
+    monkeypatch.setattr(ZipWriteFile, "_write_final_payload", slow_final_payload)
+    buffer = io.BytesIO()
+    archive = ZipFile(buffer, "w")
+    writer = archive.open("file.txt", "w")
+    writer.write(b"payload")
+    closer = threading.Thread(target=writer.close)
+    closer.start()
+    assert finishing.wait(timeout=5)
+    archive_closed = threading.Event()
+
+    def close_archive() -> None:
+        archive.close()
+        archive_closed.set()
+
+    waiter = threading.Thread(target=close_archive)
+    waiter.start()
+    assert not archive_closed.wait(timeout=0.1)
+    release.set()
+    closer.join(timeout=5)
+    waiter.join(timeout=5)
+    assert archive_closed.is_set()
+    with ZipFile(buffer) as reopened:
+        assert reopened.read("file.txt") == b"payload"

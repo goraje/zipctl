@@ -15,7 +15,7 @@ from zipctl.cryptography import (
 )
 from zipctl.exceptions import BadZipFile
 from zipctl.zipfile.info import WzAesExtra, ZipInfo
-from zipctl.zipfile.info.extra import _Extra, sanitize_filename
+from zipctl.zipfile.info.extra import Extra, sanitize_filename
 from zipctl.zipfile.shared import (
     MASK_ENCRYPTED,
     MASK_STRONG_ENCRYPTION,
@@ -48,7 +48,7 @@ class TestSanitizeFilename:
 
 
 # ---------------------------------------------------------------------------
-# _Extra
+# Extra
 # ---------------------------------------------------------------------------
 
 
@@ -59,29 +59,29 @@ def _make_extra_field(tag: int, body: bytes) -> bytes:
 class TestExtra:
     def test_read_one_parses_tag_and_body(self) -> None:
         raw = _make_extra_field(0x0001, b"\x01\x02\x03\x04\x05\x06\x07\x08")
-        field, rest = _Extra.read_one(raw)
+        field, rest = Extra.read_one(raw)
         assert field.id == 0x0001
         assert rest == b""
 
     def test_read_one_returns_remainder(self) -> None:
         f1 = _make_extra_field(0x0001, b"\x00" * 8)
         f2 = _make_extra_field(0x9901, b"\x00" * 7)
-        field, rest = _Extra.read_one(f1 + f2)
+        field, rest = Extra.read_one(f1 + f2)
         assert field.id == 0x0001
         assert rest == f2
 
     def test_read_one_malformed_gives_none_id(self) -> None:
-        field, _ = _Extra.read_one(b"\x01")  # too short for header
+        field, _ = Extra.read_one(b"\x01")  # too short for header
         assert field.id is None
 
     def test_iter_fields_empty_yields_nothing(self) -> None:
-        assert list(_Extra.iter_fields(b"")) == []
+        assert list(Extra.iter_fields(b"")) == []
 
     def test_iter_fields_yields_all_fields(self) -> None:
         data = _make_extra_field(0x0001, b"\x00" * 8) + _make_extra_field(
             0x9901, b"\x00" * 7
         )
-        fields = list(_Extra.iter_fields(data))
+        fields = list(Extra.iter_fields(data))
         assert len(fields) == 2
         assert fields[0].id == 0x0001
         assert fields[1].id == 0x9901
@@ -89,17 +89,17 @@ class TestExtra:
     def test_strip_removes_matching_tag(self) -> None:
         f1 = _make_extra_field(0x0001, b"\x00" * 8)
         f2 = _make_extra_field(0x9901, b"\x00" * 7)
-        result = _Extra.strip(f1 + f2, {0x0001})
+        result = Extra.strip(f1 + f2, {0x0001})
         assert result == f2
 
     def test_strip_keeps_unmatched_fields(self) -> None:
         f1 = _make_extra_field(0x0001, b"\x00" * 8)
         f2 = _make_extra_field(0x9901, b"\x00" * 7)
-        result = _Extra.strip(f1 + f2, {0xDEAD})
+        result = Extra.strip(f1 + f2, {0xDEAD})
         assert result == f1 + f2
 
     def test_strip_empty_input(self) -> None:
-        assert _Extra.strip(b"", {0x0001}) == b""
+        assert Extra.strip(b"", {0x0001}) == b""
 
 
 # ---------------------------------------------------------------------------

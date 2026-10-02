@@ -1,14 +1,11 @@
 """Writable file-like object for streaming data into a ZIP archive entry."""
 
-# Friend access inside the zipfile package (ruff exempts it via SLF001).
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import io
 import threading
 from enum import Enum
-from typing import IO, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Protocol
 
 from typing_extensions import override
 
@@ -18,23 +15,37 @@ from zipctl.compression.methods import CompressorBase
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer
 
-    from zipctl.zipfile.file import ZipFile
-
 from zipctl.cryptography.base import BaseZipEncryptor
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.io_wrappers import write_all
 from zipctl.zipfile.shared import ZIP64_LIMIT, crc32
-from zipctl.zipfile.write_coordinator import WriterReservation
 
-__all__ = ["ZipWriteFile"]
+__all__ = ["EntryOwner", "ZipWriteFile"]
 
 
 class WriteState(str, Enum):
     ACTIVE = "active"
-    FINALIZING = "finalizing"
     COMMITTED = "committed"
     FAILED = "failed"
-    CLOSED = "closed"
+    CLOSED = "closed"  # never written to: not built yet, or nothing to do
+
+
+class EntryOwner(Protocol):
+    """What a :class:`ZipWriteFile` needs from the archive it writes into."""
+
+    @property
+    def fp(self) -> IO[bytes]: ...
+
+    @property
+    def lock(self) -> threading.RLock: ...
+
+    def entry_written(self, entry: ZipWriteFile, zinfo: ZipInfo, end: int) -> None:
+        """*entry* is complete; the archive continues at offset *end*."""
+        ...
+
+    def entry_failed(self, entry: ZipWriteFile) -> None:
+        """*entry* failed and is abandoned."""
+        ...
 
 
 class ZipWriteFile(io.BufferedIOBase):
@@ -51,36 +62,38 @@ class ZipWriteFile(io.BufferedIOBase):
 
     def __init__(
         self,
-        zf: ZipFile,
+        owner: EntryOwner,
         zinfo: ZipInfo,
         zip64: bool,
         encryptor: BaseZipEncryptor | None = None,
         compression_registry: Registry = registry,
-        reservation: WriterReservation | None = None,
         raw: bool = False,
     ) -> None:
         """Initialise the write-file, emit the local header, and (if requested)
         the encryption header.
 
+        Writes and closing hold the owner's lock, so the archive cannot be
+        closed or read from another thread in the middle of either.
+
         Args:
-            zf: The parent :class:`ZipFile` instance.
+            owner: The archive being written.
             zinfo: Metadata for the entry being written.
             zip64: Whether to use ZIP64 extensions for this entry.
             encryptor: Optional encryptor.  When provided,
                 :meth:`BaseZipEncryptor.update_zipinfo` is called to patch
                 *zinfo* before the local header is written, and the
                 encryption header is written immediately afterwards.
-            raw: The data is already compressed (see :meth:`_write_raw`); the
+            raw: The data is already compressed (see :meth:`write_raw`); the
                 CRC-32 and sizes come from *zinfo* and nothing is compressed.
         """
         # Inert until fully built, so a failure below (say, an unusable
         # compression level) does not make close() misbehave when the
         # half-built object is finalised.
         self._state: WriteState = WriteState.CLOSED
-        self._lock: threading.RLock = threading.RLock()
+        self._lock: threading.RLock = owner.lock
         self._zinfo: ZipInfo = zinfo
         self._zip64: bool = zip64
-        self._zipfile: ZipFile = zf
+        self._owner: EntryOwner = owner
         self._raw: bool = raw
         self._compressor: CompressorBase | None = (
             None
@@ -94,7 +107,6 @@ class ZipWriteFile(io.BufferedIOBase):
         self._compress_size: int = 0
         self._crc: int = zinfo.CRC if raw else 0
         self._error: BaseException | None = None
-        self._reservation: WriterReservation | None = reservation
 
         if self._encryptor is not None:
             self._encryptor.update_zipinfo(self._zinfo)
@@ -107,9 +119,8 @@ class ZipWriteFile(io.BufferedIOBase):
 
     @property
     def _fileobj(self) -> IO[bytes]:
-        """The underlying raw file object of the parent :class:`ZipFile`."""
-        assert self._zipfile.fp is not None
-        return self._zipfile.fp
+        """The archive's file object."""
+        return self._owner.fp
 
     @property
     def name(self) -> str:
@@ -129,16 +140,8 @@ class ZipWriteFile(io.BufferedIOBase):
         return True
 
     def _write_local_header(self) -> None:
-        """Serialise and write the local file header to the archive.
-
-        Also marks the parent :class:`ZipFile` as modified. Concurrent
-        opens are rejected via the parent's ``_write_coordinator``, whose
-        reservation is already active by the time this runs.
-        """
-        header = self._zinfo.FileHeader(self._zip64)
-        # From this point onwards, we have modified the archive.
-        self._zipfile._mark_modified()
-        write_all(self._fileobj, header)
+        """Serialise and write the local file header to the archive."""
+        write_all(self._fileobj, self._zinfo.FileHeader(self._zip64))
 
     def _write_encryption_header(self) -> None:
         """Request the encryption header from the encryptor and write it.
@@ -171,7 +174,7 @@ class ZipWriteFile(io.BufferedIOBase):
         with self._lock:
             self._ensure_active()
             if self._raw:
-                raise ValueError("a raw entry takes _write_raw, not write")
+                raise ValueError("a raw entry takes write_raw, not write")
             if not isinstance(data, (bytes, bytearray)):
                 data = memoryview(data)  # a bad argument must not fail the entry
             try:
@@ -202,7 +205,7 @@ class ZipWriteFile(io.BufferedIOBase):
         write_all(self._fileobj, raw)
         return nbytes
 
-    def _write_raw(self, data: bytes) -> None:
+    def write_raw(self, data: bytes) -> None:
         """Write already compressed *data*, encrypted if the entry is.
 
         Only for an entry opened raw, where the CRC-32 and the uncompressed
@@ -211,7 +214,7 @@ class ZipWriteFile(io.BufferedIOBase):
         with self._lock:
             self._ensure_active()
             if not self._raw:
-                raise ValueError("_write_raw needs a raw entry")
+                raise ValueError("write_raw needs a raw entry")
             try:
                 if self._encryptor:
                     data = self._encryptor.encrypt(data)
@@ -242,18 +245,13 @@ class ZipWriteFile(io.BufferedIOBase):
         if self._state in (WriteState.COMMITTED, WriteState.CLOSED):
             return
         self._ensure_active()
-        self._state = WriteState.FINALIZING
-        if self._reservation is not None:
-            self._zipfile._write_coordinator.begin_finalization(self._reservation)
         try:
             self._write_final_payload()
             self._update_metadata()
             self._validate_sizes()
-            self._write_entry_trailer()
-            self._register_entry()
+            end = self._write_entry_trailer()
             self._state = WriteState.COMMITTED
-            if self._reservation is not None:
-                self._zipfile._write_coordinator.commit(self._reservation)
+            self._owner.entry_written(self, self._zinfo, end)
         except BaseException as exc:
             self._fail(exc)
             raise
@@ -261,12 +259,9 @@ class ZipWriteFile(io.BufferedIOBase):
             super().close()
 
     def _fail(self, exc: BaseException) -> None:
-        if not self._zipfile._seekable:
-            self._zipfile._write_failed = True
         self._error = exc
         self._state = WriteState.FAILED
-        if self._reservation is not None:
-            self._zipfile._write_coordinator.fail(self._reservation)
+        self._owner.entry_failed(self)
         super().close()
 
     def _write_final_payload(self) -> None:
@@ -288,16 +283,13 @@ class ZipWriteFile(io.BufferedIOBase):
         if not self._zip64 and self._compress_size > ZIP64_LIMIT:
             raise RuntimeError("Compressed size unexpectedly exceeded ZIP64 limit")
 
-    def _write_entry_trailer(self) -> None:
+    def _write_entry_trailer(self) -> int:
+        """Finish the entry's records and return the offset just after it."""
         if self._zinfo.use_data_descriptor:
             write_all(self._fileobj, self._zinfo.data_descriptor(self._zip64))
-            self._zipfile.start_dir = self._fileobj.tell()
-            return
+            return self._fileobj.tell()
         end = self._fileobj.tell()
         self._fileobj.seek(self._zinfo.header_offset)
         write_all(self._fileobj, self._zinfo.FileHeader(self._zip64))
         self._fileobj.seek(end)
-        self._zipfile.start_dir = end
-
-    def _register_entry(self) -> None:
-        self._zipfile._add_entry(self._zinfo)
+        return end

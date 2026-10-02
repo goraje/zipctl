@@ -186,7 +186,7 @@ def test_concurrent_reader_registration_and_archive_close(tmp_path: Path) -> Non
         list(executor.map(read_or_close, range(8)))
     assert raw is not None
     assert raw.closed
-    assert archive._file_ref_cnt == 0
+    assert archive._stream._users == 0
 
 
 @pytest.mark.parametrize("encryption", [None, WZ_AES, ZIP_CRYPTO])

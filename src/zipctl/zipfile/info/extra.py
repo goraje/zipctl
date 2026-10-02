@@ -85,7 +85,7 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
-class _Extra:
+class Extra:
     """A single ZIP extra-data field (tag + length + body).
 
     Attributes:
@@ -107,14 +107,14 @@ class _Extra:
         self.id: int | None = field_id
 
     @classmethod
-    def read_one(cls, raw: bytes | memoryview) -> tuple[_Extra, bytes | memoryview]:
+    def read_one(cls, raw: bytes | memoryview) -> tuple[Extra, bytes | memoryview]:
         """Parse one extra field from the start of *raw*.
 
         Args:
             raw: Byte buffer starting at the beginning of an extra field.
 
         Returns:
-            A tuple of the parsed ``_Extra`` instance and the remaining
+            A tuple of the parsed ``Extra`` instance and the remaining
             unconsumed bytes after the field.
         """
         try:
@@ -125,7 +125,7 @@ class _Extra:
         return cls(raw[: 4 + xlen], xid), raw[4 + xlen :]
 
     @classmethod
-    def iter_fields(cls, data: bytes) -> Generator[_Extra, None, None]:
+    def iter_fields(cls, data: bytes) -> Generator[Extra, None, None]:
         """Yield each extra field parsed from *data*.
 
         Uses a zero-copy ``memoryview`` internally for efficient slicing.
@@ -134,7 +134,7 @@ class _Extra:
             data: Raw bytes of a ZIP extra-data block.
 
         Yields:
-            One ``_Extra`` instance per field in the block.
+            One ``Extra`` instance per field in the block.
         """
         # use memoryview for zero-copy slices
         rest: bytes | memoryview = memoryview(data)

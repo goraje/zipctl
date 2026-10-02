@@ -1,14 +1,11 @@
 """Extracting members of a ZipFile."""
 
-# Friend access inside the zipfile package (ruff exempts it via SLF001).
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from typing import IO, Protocol, TypeAlias
 
 from zipctl.zipfile.extract import (
     ExtractPolicy,
@@ -29,13 +26,21 @@ from zipctl.zipfile.progress import (
     ProgressReporter,
     propagate_callback_errors,
 )
-from zipctl.zipfile.shared import StrPath
+from zipctl.zipfile.shared import ReadWriteMode, StrPath
 from zipctl.zipfile.validators import member_target_name
 
-if TYPE_CHECKING:
-    from zipctl.zipfile.file import ZipFile
-
 __all__ = ["PasswordProvider"]
+
+
+class _Archive(Protocol):
+    """The part of ``ZipFile`` extraction uses."""
+
+    def getinfo(self, name: str) -> ZipInfo: ...
+
+    def open(
+        self, name: str | ZipInfo, mode: ReadWriteMode = "r", pwd: bytes | None = None
+    ) -> IO[bytes]: ...
+
 
 # Extraction can take one password for the whole archive, or a callable that is
 # asked for the password of each encrypted member (return None for "unknown").
@@ -50,7 +55,7 @@ def password_for(member: ZipInfo, pwd: bytes | PasswordProvider | None) -> bytes
 
 
 def extract_all_with_progress(
-    zf: ZipFile,
+    zf: _Archive,
     members: list[str | ZipInfo],
     path: str,
     pwd: bytes | PasswordProvider | None,
@@ -71,7 +76,7 @@ def extract_all_with_progress(
 
 
 def extract_members_with_policy(
-    zf: ZipFile,
+    zf: _Archive,
     members: list[str | ZipInfo],
     path: StrPath | None,
     pwd: bytes | PasswordProvider | None,
@@ -122,7 +127,7 @@ def extract_members_with_policy(
 
 
 def extract_member(
-    zf: ZipFile,
+    zf: _Archive,
     member: str | ZipInfo,
     destination: str,
     pwd: bytes | PasswordProvider | None,

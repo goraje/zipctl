@@ -40,8 +40,8 @@ from zipctl.zipfile.info.extra import (
     DD_SIGNATURE,
     EXTRA_NOT_CARRIED,
     EXTRA_ZIP64,
+    Extra,
     WzAesExtra,
-    _Extra,
     sanitize_filename,
 )
 from zipctl.zipfile.shared import (
@@ -276,7 +276,7 @@ class ZipInfo:
         WZ-AES) and the Unicode path are left out.  Raises :class:`BadZipFile` if
         the extra data is malformed, which cannot be so for a parsed entry.
         """
-        return _Extra.strip(self.extra, EXTRA_NOT_CARRIED)
+        return Extra.strip(self.extra, EXTRA_NOT_CARRIED)
 
     @property
     def use_data_descriptor(self) -> bool:

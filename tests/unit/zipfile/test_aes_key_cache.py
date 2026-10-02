@@ -115,7 +115,7 @@ def test_closing_the_archive_forgets_the_keys(
     zf = ZipFile(io.BytesIO(archive))
     zf.read("a.txt", pwd=PASSWORD)
     zf.close()
-    assert zf._aes_keys.get(PASSWORD, derivations[0], 66) is None
+    assert zf._reader.keys.get(PASSWORD, derivations[0], 66) is None
 
 
 def test_the_cache_keeps_only_the_most_recently_used_entries() -> None:
