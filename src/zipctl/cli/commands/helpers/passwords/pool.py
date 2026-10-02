@@ -61,16 +61,28 @@ class PasswordPool:
         self._prompt: Callable[[str], str] = prompt
 
     @staticmethod
-    def _status(zf: ZipFile, info: ZipInfo, password: bytes) -> PasswordStatus:
-        return zf.check_password(password, members=[info], full=True).members[0].status
+    def _status(
+        zf: ZipFile, info: ZipInfo, password: bytes, *, full: bool = False
+    ) -> PasswordStatus:
+        return zf.check_password(password, members=[info], full=full).members[0].status
 
     def resolve(self, zf: ZipFile, info: ZipInfo) -> bytes | PasswordProblem:
         """Find the password for encrypted *info*, or say why there is none."""
         problem = PasswordProblem.MISSING
-        for password in self._known:
-            if problem is PasswordProblem.MISSING:
-                problem = PasswordProblem.WRONG
-            status = self._status(zf, info, password)
+        # The verifier is cheap and rejects most wrong passwords.  Reading the
+        # member is what authenticates it, so only a tie between several
+        # verifier matches (a collision) is settled by a full check here.
+        likely = [
+            password
+            for password in self._known
+            if self._status(zf, info, password) is PasswordStatus.ACCEPTED
+        ]
+        if self._known:
+            problem = PasswordProblem.WRONG
+        if len(likely) == 1:
+            return likely[0]
+        for password in likely:
+            status = self._status(zf, info, password, full=True)
             if status is PasswordStatus.ACCEPTED:
                 return password
             if status is PasswordStatus.CORRUPT:
@@ -92,12 +104,9 @@ class PasswordPool:
             if problem is PasswordProblem.MISSING:
                 problem = PasswordProblem.WRONG
             password = password_bytes(text)
-            status = self._status(zf, info, password)
-            if status is PasswordStatus.ACCEPTED:
+            if self._status(zf, info, password) is PasswordStatus.ACCEPTED:
                 self._known.insert(0, password)  # tried first on the next member
                 return password
-            if status is PasswordStatus.CORRUPT:
-                problem = PasswordProblem.CORRUPT
             if attempt + 1 < MAX_PROMPT_ATTEMPTS:
                 self._ctx.err("zipctl: incorrect password, try again")
         return problem

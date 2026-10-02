@@ -19,22 +19,31 @@ from zipctl.zipfile.password import (
 
 
 class FakeZip:
-    """Accepts the password each member was set up with."""
+    """Accepts the password each member was set up with.
+
+    A *collides* password passes the verifier but fails the full check, like a
+    wrong password that happens to match the 1-in-256 verifier.
+    """
 
     def __init__(
-        self, secrets: dict[str, bytes], corrupt: frozenset[str] | None = None
+        self,
+        secrets: dict[str, bytes],
+        corrupt: frozenset[str] | None = None,
+        collides: frozenset[bytes] | None = None,
     ) -> None:
         self.secrets: dict[str, bytes] = secrets
         self.corrupt: frozenset[str] = corrupt or frozenset()
+        self.collides: frozenset[bytes] = collides or frozenset()
         self.checked: list[bytes] = []
 
     def check_password(
         self, password: bytes, members: list[ZipInfo], *, full: bool = False
     ) -> PasswordCheckResult:
         name = members[0].filename
-        assert full
         self.checked.append(password)
-        if name in self.corrupt:
+        if password in self.collides:
+            status = PasswordStatus.CORRUPT if full else PasswordStatus.ACCEPTED
+        elif name in self.corrupt and full:
             status = PasswordStatus.CORRUPT
         elif self.secrets[name] == password:
             status = PasswordStatus.ACCEPTED
@@ -88,8 +97,19 @@ def test_only_wrong_passwords_and_no_terminal_means_wrong() -> None:
 
 
 def test_a_damaged_member_is_reported_as_corrupt_not_wrong() -> None:
-    zf = FakeZip({"a": b"x"}, corrupt=frozenset({"a"}))
-    assert resolve(pool(b"x"), zf, "a") is PasswordProblem.CORRUPT
+    zf = FakeZip({"a": b"x"}, corrupt=frozenset({"a"}), collides=frozenset({b"y"}))
+    assert resolve(pool(b"x", b"y"), zf, "a") is PasswordProblem.CORRUPT
+
+
+def test_one_verifier_match_is_not_read_in_full() -> None:
+    zf = FakeZip({"a": b"x"})
+    assert resolve(pool(b"nope", b"x"), zf, "a") == b"x"
+    assert zf.checked == [b"nope", b"x"]
+
+
+def test_a_verifier_collision_is_settled_by_the_full_check() -> None:
+    zf = FakeZip({"a": b"x"}, collides=frozenset({b"y"}))
+    assert resolve(pool(b"y", b"x"), zf, "a") == b"x"
 
 
 def test_an_accepted_typed_password_is_remembered_for_the_next_member() -> None:
@@ -108,7 +128,7 @@ def test_the_latest_accepted_password_is_tried_first() -> None:
     resolve(shared, zf, "b")
     zf.checked.clear()
     assert resolve(shared, zf, "c") == b"two"
-    assert zf.checked == [b"two"]
+    assert zf.checked[0] == b"two"
 
 
 def test_every_member_gets_its_own_three_wrong_answers() -> None:
