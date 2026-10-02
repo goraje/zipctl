@@ -19,7 +19,6 @@ __all__ = [
     "ZIP_ZSTANDARD",
     "CompressorBase",
     "DecompressorBase",
-    "StreamingDecompressor",
     "CompressionEntry",
     "NoopCompressor",
     "NoopDecompressor",
@@ -76,7 +75,28 @@ class NoopCompressor(CompressorBase):
 
 
 class DecompressorBase(ABC):
-    """Abstract base class defining the minimal interface for all decompressors."""
+    """Abstract base class defining the interface of every decompressor.
+
+    A reader calls :meth:`decompress` with new input while :attr:`needs_input`
+    is ``True`` and with ``b""`` while the decompressor still holds input or
+    output of its own, until :attr:`eof`.
+
+    Attributes:
+        concatenated: The format allows several independent frames one after
+            another (Zstandard), so the stream ends with its input rather than
+            with the first frame; :attr:`eof` then means "at a frame boundary".
+    """
+
+    concatenated: bool = False
+
+    @property
+    def needs_input(self) -> bool:
+        """Whether the decompressor wants more compressed input.
+
+        ``False`` while it can still produce output from input it was given
+        earlier; such a decompressor must override this.
+        """
+        return True
 
     def configure_limits(self, limits: ArchiveLimits) -> None:
         """Apply decoder budgets; custom codecs may override this hook."""
@@ -110,59 +130,6 @@ class NoopDecompressor(DecompressorBase):
     @override
     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
         return data if max_length < 0 else data[:max_length]
-
-
-class StreamingDecompressor(DecompressorBase, ABC):
-    """Extended interface for stream-oriented decompressors.
-
-    Extends DecompressorBase with support for bounded decompression,
-    leftover tail data, and explicit flushing. Used by decompressors such
-    as the zlib/deflate implementation.
-    """
-
-    @property
-    @abstractmethod
-    def unconsumed_tail(self) -> bytes:
-        """Data that was not consumed during the last decompress call.
-
-        Returns:
-            Bytes that were passed to decompress but not yet processed
-            due to a max_length limit.
-        """
-        ...
-
-    @abstractmethod
-    def flush(self) -> bytes:
-        """Flushes any remaining buffered data.
-
-        Returns:
-            Any remaining decompressed bytes.
-        """
-        ...
-
-    @abstractmethod
-    @override
-    def decompress(self, data: bytes, max_length: int = -1) -> bytes:
-        """Decompresses a chunk of data.
-
-        Args:
-            data: The compressed bytes to decompress.
-            max_length: Maximum number of bytes to return. If negative,
-                there is no limit on the output size.
-
-        Returns:
-            Decompressed bytes, up to max_length bytes if specified.
-        """
-        ...
-
-    @property
-    def needs_input(self) -> bool:
-        """Whether the decompressor needs more compressed input.
-
-        Custom decompressors that do not buffer output retain the historical
-        behavior by using the default value.
-        """
-        return True
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ import zlib
 import pytest
 
 from zipctl.compression import deflate
-from zipctl.compression.methods import CompressorBase, StreamingDecompressor
+from zipctl.compression.methods import CompressorBase, DecompressorBase
 
 pytestmark = pytest.mark.skipif(
     deflate.compression_entry is None,
@@ -18,10 +18,10 @@ pytestmark = pytest.mark.skipif(
 SAMPLE_DATA = b"Hello, World! " * 100
 
 
-def _decompressor() -> StreamingDecompressor:
+def _decompressor() -> DecompressorBase:
     assert deflate.compression_entry is not None
     decompressor = deflate.compression_entry.decompressor_factory()
-    assert isinstance(decompressor, StreamingDecompressor)
+    assert isinstance(decompressor, DecompressorBase)
     return decompressor
 
 
@@ -49,17 +49,14 @@ def test_negative_max_length_means_unlimited() -> None:
     assert result == SAMPLE_DATA
 
 
-def test_max_length_leaves_remainder_in_unconsumed_tail() -> None:
+def test_max_length_keeps_the_remaining_input() -> None:
     d = _decompressor()
-    assert d.unconsumed_tail == b""
-    d.decompress(_raw_deflate(SAMPLE_DATA), max_length=10)
-    assert d.unconsumed_tail != b""
-
-
-def test_flush_after_full_stream_is_empty() -> None:
-    d = _decompressor()
-    d.decompress(_raw_deflate(SAMPLE_DATA))
-    assert d.flush() == b""
+    assert d.needs_input
+    first = d.decompress(_raw_deflate(SAMPLE_DATA), max_length=10)
+    assert not d.needs_input
+    rest = d.decompress(b"")
+    assert first + rest == SAMPLE_DATA
+    assert d.eof
 
 
 def test_empty_input_yields_nothing() -> None:

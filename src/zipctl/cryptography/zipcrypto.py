@@ -20,6 +20,7 @@ from zipctl.exceptions import BadPassword, BadZipFile
 from zipctl.zipfile.shared import MASK_USE_DATA_DESCRIPTOR
 
 if TYPE_CHECKING:
+    from zipctl.cryptography.aes import AesKeyCache
     from zipctl.zipfile.info import ZipInfo
 
 __all__ = [
@@ -29,6 +30,8 @@ __all__ = [
 ]
 
 ZIP_CRYPTO = "ZipCrypto"
+
+_HEADER_LENGTH = 12
 
 
 def _gen_crc(crc: int) -> int:
@@ -109,15 +112,15 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
     the password by checking the 12th byte of the encryption header
     against either the CRC MSB (stored entries) or the file-time MSB
     (entries using a data descriptor).
-
-    Attributes:
-        encryption_header_length (int): Always 12 bytes.
     """
 
-    encryption_header_length: int = 12
-    authentication_trailer_length: int = 0
-
-    def __init__(self, zinfo: ZipInfo, pwd: bytes, encryption_header: bytes) -> None:
+    def __init__(
+        self,
+        zinfo: ZipInfo,
+        pwd: bytes,
+        encryption_header: bytes,
+        key_cache: AesKeyCache | None = None,
+    ) -> None:
         """Initialise the decrypter for a ZIP entry.
 
         Args:
@@ -125,14 +128,15 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
             pwd (bytes): Decryption password as raw bytes.
             encryption_header (bytes): The 12-byte encryption header read
                 from the beginning of the entry data.
+            key_cache (AesKeyCache | None): Unused; ZipCrypto derives no keys.
 
         Raises:
             BadPassword: If *pwd* does not match the check byte in
                 *encryption_header*.
         """
-        if len(encryption_header) != self.encryption_header_length:
+        super().__init__(zinfo, pwd, encryption_header, key_cache)
+        if len(encryption_header) != _HEADER_LENGTH:
             raise BadZipFile("Truncated ZipCrypto encryption header")
-        self.filename: str = zinfo.filename
         self._state: _ZipCryptoState = _ZipCryptoState(pwd)
 
         # The first 12 bytes in the cypher stream is an encryption header
@@ -148,14 +152,14 @@ class ZipCryptoDecrypter(BaseZipDecrypter):
             # compare against the CRC otherwise
             check_byte = (zinfo.CRC >> 24) & 0xFF
         if h[11] != check_byte:
-            raise BadPassword("Bad password for file %r" % zinfo.filename)
+            raise BadPassword(f"Bad password for file {zinfo.filename!r}")
 
     @classmethod
     @override
     def header_length(cls, zinfo: ZipInfo) -> int:
         """Return the encryption header length. Always 12 bytes for ZipCrypto."""
         del zinfo
-        return cls.encryption_header_length
+        return _HEADER_LENGTH
 
     @override
     def decrypt(self, data: bytes) -> bytes:

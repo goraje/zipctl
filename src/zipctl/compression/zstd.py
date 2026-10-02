@@ -14,37 +14,6 @@ from zipctl.compression.methods import (
 from zipctl.exceptions import BadZipFile
 from zipctl.limits import ArchiveLimits, ArchiveResourceLimitError
 
-_ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
-_ZSTD_FCS_BYTES = (0, 2, 4, 8)  # indexed by the frame-content-size flag
-
-
-def _frame_window(head: bytes) -> int | None:
-    """The window size a Zstandard frame declares, or ``None`` if not known yet.
-
-    Reads RFC 8878 section 3.1.1.1 directly, so the budget is enforced from
-    the frame header and not from a decoder's error message.
-    """
-    if len(head) < 5:
-        return None
-    if head[:4] != _ZSTD_MAGIC:
-        return 0  # skippable or invalid; the decoder reports it
-    descriptor = head[4]
-    single_segment = bool(descriptor & 0x20)
-    if not single_segment:
-        if len(head) < 6:
-            return None
-        exponent, mantissa = head[5] >> 3, head[5] & 7
-        base = 1 << (10 + exponent)
-        return base + base // 8 * mantissa
-    flag = descriptor >> 6
-    width = _ZSTD_FCS_BYTES[flag] or 1
-    # skip the dictionary id (0, 1, 2 or 4 bytes) to reach the content size
-    start = 5 + (0, 1, 2, 4)[descriptor & 0x03]
-    if len(head) < start + width:
-        return None
-    size = int.from_bytes(head[start : start + width], "little")
-    return size + 256 if flag == 1 else size
-
 
 class _ZstdCompressorLike(Protocol):
     def compress(self, data: bytes) -> bytes: ...
@@ -58,6 +27,9 @@ class _ZstdDecompressorLike(Protocol):
 
     @property
     def needs_input(self) -> bool: ...
+
+    @property
+    def unused_data(self) -> bytes: ...
 
     def decompress(self, data: bytes, max_length: int = -1) -> bytes: ...
 
@@ -136,43 +108,44 @@ if zstd is not None:
     class _ZstdDecompressor(DecompressorBase):
         """Wraps zstd.ZstdDecompressor to satisfy DecompressorBase.
 
+        A Zstandard stream may hold several frames back to back (multithreaded
+        compressors write them); each gets a fresh decoder, starting with the
+        bytes the previous one left unused.
+
         Attributes:
-            _d: The underlying zstd.ZstdDecompressor instance.
+            _d: The decoder of the current frame.
         """
+
+        concatenated: bool = True
 
         def __init__(self) -> None:
             """Initializes the decompressor."""
+            self._options: dict[int, int] | None = None
             self._d: _ZstdDecompressorLike = _module.ZstdDecompressor()
-            self._window_limit: int | None = None
-            self._head: bytes | None = b""  # frame header bytes until checked
 
         @override
         def configure_limits(self, limits: ArchiveLimits) -> None:
-            self._window_limit = limits.max_zstd_window_bytes
-            if self._window_limit is not None:
-                # ZSTD_d_windowLogMax is the stable public libzstd parameter 100.
-                self._d = _module.ZstdDecompressor(
-                    options={100: self._window_limit.bit_length() - 1}
-                )
+            window = limits.max_zstd_window_bytes
+            # ZSTD_d_windowLogMax is the stable public libzstd parameter 100.
+            self._options = None if window is None else {100: window.bit_length() - 1}
+            self._d = _module.ZstdDecompressor(options=self._options)
 
         @property
         @override
         def eof(self) -> bool:
-            """Whether the end of the compressed stream has been reached.
-
-            Returns:
-                True if the decompressor has reached the end of stream,
-                False otherwise.
-            """
-            return self._d.eof
+            """Whether the current frame is complete with no input left over."""
+            return self._d.eof and not self._d.unused_data
 
         @property
+        @override
         def needs_input(self) -> bool:
+            if self._d.eof:
+                return not self._d.unused_data
             return self._d.needs_input
 
         @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
-            """Decompresses a chunk of data.
+            """Decompresses a chunk of data, starting a new frame if one ended.
 
             Args:
                 data: The compressed bytes to decompress.
@@ -180,28 +153,19 @@ if zstd is not None:
             Returns:
                 Decompressed bytes.
             """
-            self._check_window(data)
+            if self._d.eof:
+                data = self._d.unused_data + data
+                if not data:
+                    return b""
+                self._d = _module.ZstdDecompressor(options=self._options)
             try:
                 return self._d.decompress(data, max_length)
             except (_module.ZstdError, EOFError) as exc:
-                if self._window_limit is not None and "memory" in str(exc).lower():
+                if "too much memory" in str(exc):
                     raise ArchiveResourceLimitError(
                         "Zstandard window exceeds configured limit"
                     ) from exc
                 raise BadZipFile("Invalid Zstandard data") from exc
-
-        def _check_window(self, data: bytes) -> None:
-            if self._head is None or self._window_limit is None:
-                return
-            self._head += data[: 16 - len(self._head)]
-            window = _frame_window(self._head)
-            if window is None:
-                return
-            self._head = None
-            if window > self._window_limit:
-                raise ArchiveResourceLimitError(
-                    "Zstandard window exceeds configured limit"
-                )
 
     compression_entry = CompressionEntry(
         compression_method=ZIP_ZSTANDARD,

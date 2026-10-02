@@ -189,6 +189,7 @@ try:
             return self._eof
 
         @property
+        @override
         def needs_input(self) -> bool:
             return self._decomp is None or self._decomp.needs_input
 

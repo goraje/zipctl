@@ -6,7 +6,7 @@ from zipctl.compression.methods import (
     ZIP_DEFLATED,
     CompressionEntry,
     CompressorBase,
-    StreamingDecompressor,
+    DecompressorBase,
 )
 from zipctl.exceptions import BadZipFile
 
@@ -60,10 +60,12 @@ try:
             """
             return self._c.flush()
 
-    class _ZlibDecompressor(StreamingDecompressor):
-        """Wraps zlib.decompressobj to satisfy StreamingDecompressor.
+    class _ZlibDecompressor(DecompressorBase):
+        """Wraps zlib.decompressobj to satisfy DecompressorBase.
 
         Uses raw deflate format (wbits=-15) as required by the ZIP specification.
+        Input left over by a bounded call is kept and decompressed first next
+        time, so :attr:`needs_input` is ``False`` until it is used up.
 
         Attributes:
             _d: The underlying zlib Decompress object.
@@ -79,24 +81,7 @@ try:
         @property
         @override
         def eof(self) -> bool:
-            """Whether the end of the compressed stream has been reached.
-
-            Returns:
-                True if the decompressor has reached the end of stream,
-                False otherwise.
-            """
             return self._d.eof
-
-        @property
-        @override
-        def unconsumed_tail(self) -> bytes:
-            """Data that was not consumed during the last decompress call.
-
-            Returns:
-                Bytes that were passed to decompress but not yet processed
-                due to a max_length limit.
-            """
-            return self._d.unconsumed_tail
 
         @property
         @override
@@ -105,7 +90,7 @@ try:
 
         @override
         def decompress(self, data: bytes, max_length: int = -1) -> bytes:
-            """Decompresses a chunk of data.
+            """Decompresses left-over input and then *data*.
 
             Args:
                 data: The compressed bytes to decompress.
@@ -116,18 +101,11 @@ try:
                 Decompressed bytes, up to max_length bytes if specified.
             """
             try:
-                return self._d.decompress(data, max(0, max_length))
+                return self._d.decompress(
+                    self._d.unconsumed_tail + data, max(0, max_length)
+                )
             except zlib.error as exc:
                 raise BadZipFile("Invalid DEFLATE data") from exc
-
-        @override
-        def flush(self) -> bytes:
-            """Flushes any remaining buffered data.
-
-            Returns:
-                Any remaining decompressed bytes.
-            """
-            return self._d.flush()
 
     compression_entry: CompressionEntry | None = CompressionEntry(
         compression_method=ZIP_DEFLATED,

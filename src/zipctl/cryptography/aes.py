@@ -213,6 +213,16 @@ class _AesCtrWithLittleEndian:
         return self.encrypt(data)
 
 
+def _strength(zinfo: ZipInfo) -> int:
+    """The entry's WZ-AES strength code, or ``BadZipFile`` if it has none."""
+    strength = zinfo.aes_extra.wz_aes_strength
+    if strength is None:
+        raise BadZipFile(f"Missing AES strength for file {zinfo.filename!r}")
+    if strength not in _WZ_KEY_LENGTHS:
+        raise BadZipFile("Invalid AES strength")
+    return strength
+
+
 class AesZipDecrypter(BaseZipDecrypter):
     """Decrypter for WZ-AES encrypted ZIP entries.
 
@@ -228,11 +238,12 @@ class AesZipDecrypter(BaseZipDecrypter):
 
     hmac_size: int = 10
     authentication_trailer_length: int = hmac_size
+    authenticates_ciphertext: bool = True
 
     def __init__(
         self,
         zinfo: ZipInfo,
-        pwd: bytes | str,
+        pwd: bytes,
         encryption_header: bytes,
         key_cache: AesKeyCache | None = None,
     ) -> None:
@@ -240,8 +251,7 @@ class AesZipDecrypter(BaseZipDecrypter):
 
         Args:
             zinfo (ZipInfo): Metadata for the ZIP entry to decrypt.
-            pwd (bytes | str): Decryption password. Strings are encoded
-                as UTF-8.
+            pwd (bytes): Decryption password.
             encryption_header (bytes): Salt and password-verification bytes
                 read from the beginning of the entry data.
             key_cache (AesKeyCache | None): Where to look for, and keep, the
@@ -252,20 +262,11 @@ class AesZipDecrypter(BaseZipDecrypter):
             BadPassword: If *pwd* does not match the password-verification
                 bytes in *encryption_header*.
         """
-        self.filename: str = zinfo.filename
+        super().__init__(zinfo, pwd, encryption_header, key_cache)
         self._wz_aes_version: int | None = zinfo.aes_extra.wz_aes_version
-
-        if isinstance(pwd, str):
-            pwd = pwd.encode("utf-8")
-
-        if zinfo.aes_extra.wz_aes_strength is None:
-            raise BadZipFile("Missing AES strength for file %r" % zinfo.filename)
-
-        try:
-            key_length = _WZ_KEY_LENGTHS[zinfo.aes_extra.wz_aes_strength]
-            salt_length = _WZ_SALT_LENGTHS[zinfo.aes_extra.wz_aes_strength]
-        except KeyError:
-            raise BadZipFile("Invalid AES strength") from None
+        strength = _strength(zinfo)
+        key_length = _WZ_KEY_LENGTHS[strength]
+        salt_length = _WZ_SALT_LENGTHS[strength]
         if len(encryption_header) != salt_length + _PWD_VERIFY_LENGTH:
             raise BadZipFile("Truncated AES encryption header")
 
@@ -287,7 +288,7 @@ class AesZipDecrypter(BaseZipDecrypter):
 
         # Also for cached material: a header may carry a verifier of its own.
         if not stdlib_hmac.compare_digest(keymaterial[2 * key_length :], pwd_verify):
-            raise BadPassword("Bad password for file %r" % zinfo.filename)
+            raise BadPassword(f"Bad password for file {zinfo.filename!r}")
         if key_cache is not None:
             key_cache.put(pwd, salt, dk_len, keymaterial)
 
@@ -299,36 +300,15 @@ class AesZipDecrypter(BaseZipDecrypter):
             hashes.SHA1(),
         )
 
-    @staticmethod
-    def encryption_header_length(zinfo: ZipInfo) -> int:
-        """Return the number of bytes in the encryption header for an entry.
-
-        Args:
-            zinfo (ZipInfo): Metadata for the ZIP entry.
-
-        Returns:
-            int: Salt length plus password-verification length in bytes.
-
-        Raises:
-            BadZipFile: If *zinfo* has no AES strength field.
-        """
-        if zinfo.aes_extra.wz_aes_strength is None:
-            raise BadZipFile("Missing AES strength for file %r" % zinfo.filename)
-        try:
-            return (
-                _WZ_SALT_LENGTHS[zinfo.aes_extra.wz_aes_strength] + _PWD_VERIFY_LENGTH
-            )
-        except KeyError:
-            raise BadZipFile("Invalid AES strength") from None
-
     @classmethod
     @override
     def header_length(cls, zinfo: ZipInfo) -> int:
-        """Return the encryption header length for an entry.
+        """Return the salt plus password-verifier length for an entry.
 
-        Delegates to :meth:`encryption_header_length`.
+        Raises:
+            BadZipFile: If *zinfo* has no valid AES strength field.
         """
-        return cls.encryption_header_length(zinfo)
+        return _WZ_SALT_LENGTHS[_strength(zinfo)] + _PWD_VERIFY_LENGTH
 
     @override
     def decrypt(self, data: bytes) -> bytes:
@@ -354,12 +334,12 @@ class AesZipDecrypter(BaseZipDecrypter):
             BadZipFile: If the computed HMAC does not match *hmac_check*.
         """
         if len(hmac_check) != self.hmac_size:
-            raise BadZipFile("Truncated HMAC check for file %r" % self.filename)
+            raise BadZipFile(f"Truncated HMAC check for file {self.filename!r}")
         hmac_copy = self.hmac.copy()
         if not stdlib_hmac.compare_digest(
             hmac_copy.finalize()[: self.hmac_size], hmac_check
         ):
-            raise BadZipFile("Bad HMAC check for file %r" % self.filename)
+            raise BadZipFile(f"Bad HMAC check for file {self.filename!r}")
 
     @override
     def finalize(

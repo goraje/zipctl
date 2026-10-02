@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
+import random
 from typing import Protocol, cast
 
 import pytest
+from typing_extensions import override
 
-from zipctl.compression import bz2, deflate, lzma, zstd
+from zipctl.compression import Registry, bz2, deflate, lzma, zstd
 from zipctl.compression import zstd as zstd_module
 from zipctl.compression.methods import (
     ZIP_BZIP2,
@@ -16,8 +19,9 @@ from zipctl.compression.methods import (
     CompressionEntry,
     CompressorBase,
     DecompressorBase,
-    StreamingDecompressor,
 )
+from zipctl.zipfile.ext import ZipExtFile
+from zipctl.zipfile.file import ZipFile
 
 SAMPLE_DATA = b"Hello, codec world! " * 100
 
@@ -113,38 +117,92 @@ def test_decompress_respects_max_length(codec: CompressionEntry) -> None:
     d = _decompressor(codec)
     output = d.decompress(compressed, 17)
     assert len(output) <= 17
-    # Codecs that do not buffer input (zlib) expect the unconsumed tail back.
+    # All input is in; each call drains what the decompressor still holds.
     for _ in range(len(data)):
         if d.eof:
             break
-        tail = d.unconsumed_tail if isinstance(d, StreamingDecompressor) else b""
-        part = d.decompress(tail, 17)
+        assert not d.needs_input
+        part = d.decompress(b"", 17)
         assert len(part) <= 17
         output += part
     assert d.eof
     assert output == data
 
 
-MAGIC = b"\x28\xb5\x2f\xfd"
-
-
-@pytest.mark.parametrize(
-    ("header", "window"),
-    [
-        (MAGIC + b"\x00\x58", 1 << 21),  # window descriptor: exponent 11
-        (MAGIC + b"\x00\x5d", (1 << 21) + (1 << 21) // 8 * 5),  # with a mantissa
-        (MAGIC + b"\x20\x05", 5),  # single segment: window is the content size
-        (MAGIC + b"\x21\x07\x09", 9),  # ... after a one-byte dictionary id
-        (MAGIC + b"\x60\x01\x00", 256 + 1),  # two-byte content size adds 256
-        (b"\x2a\x4d\x18\x00\x00", 0),  # skippable frame: left to the decoder
-    ],
+requires_zstd = pytest.mark.skipif(
+    zstd_module.zstd is None, reason="needs compression.zstd or backports.zstd"
 )
-def test_zstd_frame_window_is_read_from_the_frame_header(
-    header: bytes, window: int
+
+
+def _zstd_frame(data: bytes) -> bytes:
+    module = zstd_module.zstd
+    assert module is not None
+    compressor = module.ZstdCompressor()
+    return compressor.compress(data) + compressor.flush()
+
+
+class _TwoFrames(CompressorBase):
+    """Writes its input as two Zstandard frames, the first *first_size* bytes long."""
+
+    def __init__(self, first_size: int) -> None:
+        self._first_size: int = first_size
+        self._data: bytes = b""
+
+    @override
+    def compress(self, data: bytes) -> bytes:
+        self._data += data
+        return b""
+
+    @override
+    def flush(self) -> bytes:
+        cut = self._first_size
+        return _zstd_frame(self._data[:cut]) + _zstd_frame(self._data[cut:])
+
+
+@requires_zstd
+@pytest.mark.parametrize(
+    "frame_end", [ZipExtFile.MIN_READ_SIZE, ZipExtFile.MAX_READ_SIZE, 1000]
+)
+@pytest.mark.parametrize("chunk", [ZipExtFile.MIN_READ_SIZE, -1])
+def test_zstd_entry_of_several_frames_reads_completely(
+    frame_end: int, chunk: int
 ) -> None:
-    assert zstd_module._frame_window(header) == window  # noqa: SLF001
+    data = random.Random(frame_end).randbytes(frame_end + 5000)
+    # Incompressible data: a frame is its content plus a small overhead, so
+    # this converges on a first frame ending exactly at *frame_end*.
+    first_size = frame_end
+    for _ in range(5):
+        first_size += frame_end - len(_zstd_frame(data[:first_size]))
+    assert len(_zstd_frame(data[:first_size])) == frame_end
+    registry = Registry()
+    entry = zstd_module.compression_entry
+    assert entry is not None
+    registry.register(
+        ZIP_ZSTANDARD,
+        CompressionEntry(
+            ZIP_ZSTANDARD,
+            lambda _level: _TwoFrames(first_size),
+            entry.decompressor_factory,
+        ),
+    )
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w", compression_registry=registry) as archive:
+        archive.writestr("m", data, compress_type=ZIP_ZSTANDARD)
+    with ZipFile(buffer) as archive, archive.open("m") as member:
+        output = b""
+        while part := member.read(chunk):
+            output += part
+    assert output == data
 
 
-def test_zstd_frame_window_waits_for_a_complete_header() -> None:
-    assert zstd_module._frame_window(MAGIC) is None  # noqa: SLF001
-    assert zstd_module._frame_window(MAGIC + b"\x00") is None  # noqa: SLF001
+@requires_zstd
+def test_zstd_is_not_at_eof_inside_a_second_frame() -> None:
+    entry = zstd_module.compression_entry
+    assert entry is not None
+    d = _decompressor(entry)
+    assert d.concatenated
+    output = d.decompress(_zstd_frame(b"one") + _zstd_frame(b"two")[:5])
+    while not d.needs_input:
+        output += d.decompress(b"")
+    assert output == b"one"
+    assert not d.eof

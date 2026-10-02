@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 from zipctl.exceptions import BadZipFile
 
 if TYPE_CHECKING:
+    from zipctl.cryptography.aes import AesKeyCache
     from zipctl.zipfile.info import ZipInfo
 
 
@@ -30,14 +31,38 @@ class ReadableStream(Protocol):
 class BaseZipDecrypter(ABC):
     """Abstract base class for ZIP entry decrypters.
 
-    Subclasses must implement :meth:`decrypt` and :meth:`header_length` to
-    provide the decryption logic for a specific algorithm. :meth:`finalize`
-    has a CRC-32 default (correct for ZipCrypto and WZ-AES V1); WZ-AES V2
-    overrides it to also verify the HMAC authentication tag.
+    A decrypter is built from the entry, the password and the encryption
+    header read in front of the ciphertext; construction raises
+    :class:`~zipctl.exceptions.BadPassword` when the header's verifier rejects
+    the password.  Subclasses implement :meth:`decrypt` and
+    :meth:`header_length`.  :meth:`finalize` has a CRC-32 default (correct for
+    ZipCrypto and WZ-AES V1); WZ-AES overrides it to verify its HMAC as well.
+
+    Attributes:
+        authentication_trailer_length: Bytes of authentication data following
+            the ciphertext, which :meth:`finalize` reads.
+        authenticates_ciphertext: Whether :meth:`finalize` proves the entry
+            intact from the ciphertext alone, so verifying it needs no
+            decompression.
     """
 
     authentication_trailer_length: int = 0
-    filename: str = "?"
+    authenticates_ciphertext: bool = False
+
+    def __init__(
+        self,
+        zinfo: ZipInfo,
+        pwd: bytes,
+        encryption_header: bytes,
+        key_cache: AesKeyCache | None = None,
+    ) -> None:
+        """Check *pwd* against *encryption_header* and get ready to decrypt.
+
+        *key_cache* keeps derived keys across decrypters of one archive; a
+        scheme without key derivation ignores it.
+        """
+        del pwd, encryption_header, key_cache
+        self.filename: str = zinfo.filename
 
     @abstractmethod
     def decrypt(self, data: bytes) -> bytes:
@@ -55,7 +80,7 @@ class BaseZipDecrypter(ABC):
 
     @classmethod
     @abstractmethod
-    def header_length(cls, zinfo: "ZipInfo") -> int:
+    def header_length(cls, zinfo: ZipInfo) -> int:
         """Return the length in bytes of this algorithm's encryption header.
 
         Args:
@@ -83,7 +108,7 @@ class BaseZipDecrypter(ABC):
             expected_crc (int | None): The CRC-32 recorded for the entry,
                 or ``None`` if unavailable.
             running_crc (int | None): The CRC-32 accumulated while reading,
-                or ``None`` before EOF is reached.
+                or ``None`` when the data was not decompressed.
             fileobj (ReadableStream): The underlying stream, positioned
                 right after the ciphertext, for reading any trailing
                 authentication bytes.
@@ -109,7 +134,7 @@ class BaseZipEncryptor(ABC):
     """
 
     @abstractmethod
-    def update_zipinfo(self, zipinfo: "ZipInfo") -> None:
+    def update_zipinfo(self, zipinfo: ZipInfo) -> None:
         """Write algorithm-specific fields into a ZipInfo extra-data structure.
 
         Args:

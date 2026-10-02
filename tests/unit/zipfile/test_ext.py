@@ -36,7 +36,7 @@ class TestZipExtFileSetupDecrypter:
         ext._pwd = None
         ext.name = "secret.txt"
 
-        with pytest.raises(PasswordRequired, match="requires a password"):
+        with pytest.raises(PasswordRequired, match="password required"):
             ext._setup_decrypter()
 
     def test_zipcrypto_missing_password_raises(self) -> None:
@@ -62,7 +62,7 @@ class TestZipExtFileSetupDecrypter:
 
         cls = ext._setup_decrypter()
 
-        header_len = AesZipDecrypter.encryption_header_length(ext._zinfo)
+        header_len = AesZipDecrypter.header_length(ext._zinfo)
         assert cls is AesZipDecrypter
         assert len(ext.encryption_header) == header_len
         assert ext._orig_compress_left == (100 - header_len - AesZipDecrypter.hmac_size)
@@ -80,7 +80,5 @@ class TestZipExtFileSetupDecrypter:
         cls = ext._setup_decrypter()
 
         assert cls is ZipCryptoDecrypter
-        assert len(ext.encryption_header) == ZipCryptoDecrypter.encryption_header_length
-        assert ext._orig_compress_left == (
-            80 - ZipCryptoDecrypter.encryption_header_length
-        )
+        assert len(ext.encryption_header) == 12
+        assert ext._orig_compress_left == 80 - 12

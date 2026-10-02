@@ -7,12 +7,15 @@ from typing_extensions import override
 
 from zipctl.cryptography.base import BaseZipDecrypter, BaseZipEncryptor
 from zipctl.exceptions import BadZipFile
+from zipctl.zipfile.info import ZipInfo
+
+_INFO = ZipInfo("x")
 
 
 class TestBaseZipDecrypter:
     def test_cannot_instantiate_directly(self) -> None:
         with pytest.raises(TypeError):
-            BaseZipDecrypter()  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
+            BaseZipDecrypter(_INFO, b"pw", b"")  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
 
     def test_subclass_missing_decrypt_cannot_instantiate(self) -> None:
         class Incomplete(BaseZipDecrypter):  # pyright: ignore[reportImplicitAbstractClass]  # left incomplete on purpose
@@ -22,7 +25,7 @@ class TestBaseZipDecrypter:
                 return 0
 
         with pytest.raises(TypeError):
-            Incomplete()  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
+            Incomplete(_INFO, b"pw", b"")  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
 
     def test_subclass_missing_header_length_cannot_instantiate(self) -> None:
         class Incomplete(BaseZipDecrypter):  # pyright: ignore[reportImplicitAbstractClass]  # left incomplete on purpose
@@ -31,7 +34,7 @@ class TestBaseZipDecrypter:
                 return data
 
         with pytest.raises(TypeError):
-            Incomplete()  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
+            Incomplete(_INFO, b"pw", b"")  # type: ignore[abstract]  # ty: ignore[call-non-callable]  # pyright: ignore[reportAbstractUsage]  # the test proves it cannot be instantiated
 
     def test_concrete_subclass_can_instantiate(self) -> None:
         class Concrete(BaseZipDecrypter):
@@ -44,7 +47,7 @@ class TestBaseZipDecrypter:
             def header_length(cls, zinfo: object) -> int:
                 return 0
 
-        obj = Concrete()
+        obj = Concrete(_INFO, b"pw", b"")
         assert obj.decrypt(b"hello") == b"hello"
 
     def test_decrypt_passthrough(self) -> None:
@@ -58,7 +61,7 @@ class TestBaseZipDecrypter:
             def header_length(cls, zinfo: object) -> int:
                 return 0
 
-        assert Concrete().decrypt(b"\x00\x01\x02") == b"\x00\x01\x02"
+        assert Concrete(_INFO, b"pw", b"").decrypt(b"\x00\x01\x02") == b"\x00\x01\x02"
 
     def test_finalize_default_checks_crc32(self) -> None:
         class Concrete(BaseZipDecrypter):
@@ -71,7 +74,7 @@ class TestBaseZipDecrypter:
             def header_length(cls, zinfo: object) -> int:
                 return 0
 
-        obj = Concrete()
+        obj = Concrete(_INFO, b"pw", b"")
         obj.finalize(123, 123, io.BytesIO())
         with pytest.raises(BadZipFile, match="Bad CRC-32"):
             obj.finalize(123, 456, io.BytesIO())

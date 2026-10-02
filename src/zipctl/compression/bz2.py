@@ -76,6 +76,7 @@ try:
             return self._d.eof
 
         @property
+        @override
         def needs_input(self) -> bool:
             return self._d.needs_input
 

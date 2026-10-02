@@ -225,11 +225,6 @@ class TestAesZipDecrypter:
         dec = AesZipDecrypter(zinfo, b"secret", enc.encryption_header())
         assert dec.filename == "test.txt"
 
-    def test_valid_password_accepts_str(self) -> None:
-        enc, zinfo = self._make_pair(b"secret")
-        dec = AesZipDecrypter(zinfo, "secret", enc.encryption_header())
-        assert dec.filename == "test.txt"
-
     def test_wrong_password_raises_runtime_error(self) -> None:
         enc, zinfo = self._make_pair(b"correct")
         with pytest.raises(RuntimeError, match="Bad password"):
@@ -256,11 +251,11 @@ class TestAesZipDecrypter:
     ) -> None:
         enc = AesZipEncryptor(b"pw", nbits=nbits)
         zinfo = _make_zinfo(strength=enc.aes_strength)
-        assert AesZipDecrypter.encryption_header_length(zinfo) == expected_header_len
+        assert AesZipDecrypter.header_length(zinfo) == expected_header_len
 
     def test_encryption_header_length_missing_strength_raises(self) -> None:
         with pytest.raises(BadZipFile):
-            AesZipDecrypter.encryption_header_length(_make_zinfo(strength=None))
+            AesZipDecrypter.header_length(_make_zinfo(strength=None))
 
     def test_decrypt_empty_returns_empty(self) -> None:
         enc, zinfo = self._make_pair(b"pw")

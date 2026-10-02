@@ -162,8 +162,8 @@ class TestZipCryptoEncryptor:
 
 
 class TestZipCryptoDecrypter:
-    def test_encryption_header_length_class_attribute(self) -> None:
-        assert ZipCryptoDecrypter.encryption_header_length == 12
+    def test_header_length_is_twelve(self) -> None:
+        assert ZipCryptoDecrypter.header_length(ZipInfo("x")) == 12
 
     def test_valid_password_via_datadescriptor(self) -> None:
         dos_time = 0x5A3C

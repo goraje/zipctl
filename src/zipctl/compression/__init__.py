@@ -19,7 +19,6 @@ from zipctl.compression.methods import (
     DecompressorBase,
     NoopCompressor,
     NoopDecompressor,
-    StreamingDecompressor,
 )
 
 __all__ = [
@@ -35,7 +34,6 @@ __all__ = [
     "DecompressorBase",
     "NoopCompressor",
     "NoopDecompressor",
-    "StreamingDecompressor",
     "CompressionEntry",
     "Registry",
     "registry",
