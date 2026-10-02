@@ -19,8 +19,12 @@ contracts, rather than changing the classifier alone.
 - `ArchiveLimits` is frozen. Each budget accepts a non-negative integer or
   `None`; booleans are rejected. Zstandard windows additionally require a power
   of two from 1 KiB through 2 GiB. Invalid values raise `ValueError`.
-- Library parser budgets are unlimited by default; the default LZMA dictionary
-  cap is 1 GiB. CLI defaults are stricter and documented in the README.
+- Parser budgets default to the same finite values in the library and the CLI
+  (100 000 entries, 64 MiB directory, 32 MiB metadata, 64 MiB LZMA dictionary,
+  64 MiB Zstandard window); pass `None` to disable one.
+- An archive with more than one end-of-central-directory record that reaches the
+  end of the file raises `BadZipFile` ("Ambiguous end of central directory"):
+  parsers that choose differently would disagree about its contents.
 - `ArchiveResourceLimitError` is separate from `BadZipFile` and from extraction
   policy failures: an otherwise valid archive can exceed the caller's budget.
   It propagates from construction or payload processing and is never converted
@@ -81,8 +85,9 @@ Extraction follows archive order. A later explicit directory entry can refer to
 a directory created for an earlier child. Rename candidates preserve suffix
 chains and are rechecked against extension and custom rules.
 
-`ERROR`, `SKIP` and `RENAME` use no-clobber publication and require hard-link
-support. `REPLACE` uses atomic replacement. These guarantees apply per member,
+`ERROR`, `SKIP` and `RENAME` use no-clobber publication: hard links where
+available, otherwise (FAT, exFAT, some network mounts) an exclusive placeholder
+that is then replaced, which briefly exposes an empty file. `REPLACE` uses atomic replacement. These guarantees apply per member,
 not to an entire extraction batch. Previous successful members can remain after
 a later failure; inspect the partial result. Temporary member output is removed
 on failure or interruption where the process can still execute cleanup.

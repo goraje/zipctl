@@ -6,13 +6,12 @@ authors = [
 ]
 description = "ZIP library derived from CPython zipfile with WinZip AES and ZipCrypto support"
 readme = "README.md"
-license = "MIT"
+license = "MIT AND PSF-2.0"
 license-files = ["LICENSE", "NOTICE", "licenses/*.txt"]
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -128,3 +127,7 @@ extend-ignore-re = [
     "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",
     "(#|//)\\s*spellchecker:ignore-next-line\\n.*",
 ]
+
+# CLI tests run `zipctl` as a subprocess; without this their lines go uncounted.
+[tool.coverage.run]
+patch = ["subprocess"]

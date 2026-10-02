@@ -613,6 +613,9 @@ class ZipExtFile(io.BufferedIOBase):
         if self._compress_type == ZIP_DEFLATED:
             assert isinstance(self._decompressor, StreamingDecompressor)
             data = self._decompressor.decompress(data, n)
+            # Deliberately stricter than CPython, which also accepts exhausted
+            # input without a final block: only the end-of-stream marker proves
+            # the entry was not truncated.
             self._eof = self._decompressor.eof
             return data
         data = self._decompressor.decompress(data, n)

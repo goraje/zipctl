@@ -46,7 +46,8 @@ protection; version 1 stores the plaintext CRC-32 in both ZIP headers.
   `ZIP_ZSTANDARD` compression
 
 ZIP LZMA archives declare their dictionary size in the member stream. zipctl
-rejects dictionaries larger than 1 GiB before constructing a decompressor.
+rejects dictionaries larger than the configured budget (64 MiB by default) before
+constructing a decompressor.
 This bounds attacker-controlled allocation while retaining compatibility with
 normal ZIP LZMA archives; applications handling untrusted archives should also
 apply extraction size and compression-ratio limits.
@@ -639,8 +640,10 @@ platforms use the strongest path-based checks available.
 The destination must not be concurrently rearranged by an untrusted process:
 symlink targets can change after validation, and path-based platforms cannot
 provide descriptor-relative containment. No-overwrite commits use exclusive
-hard links and fail rather than silently replacing a concurrent file; a
-filesystem without hard-link support reports an extraction error. Replacement
+hard links and fail rather than silently replacing a concurrent file. A
+filesystem without hard-link support (FAT, exFAT, some network mounts) falls
+back to an exclusive placeholder that is then replaced: existing files are still
+never overwritten, but an empty placeholder is briefly visible. Replacement
 uses atomic rename. The same no-clobber rule applies to CLI archive creation.
 
 Unicode Path metadata determines the effective extraction name; policy checks
@@ -692,11 +695,13 @@ decoder budgets abort payload processing. These errors are not downgraded by
 extraction policy actions. CLI `test` records a decoder failure for the member and
 continues testing the remaining members.
 
-Library defaults keep parser budgets unlimited and the existing 1 GiB LZMA cap.
-CLI commands use the finite defaults shown above. Override them with
+`ArchiveLimits()` defaults to the finite values shown above in the library and
+in the CLI alike; pass `None` for a budget to disable it. Override them on the
+command line with
 `--archive-max-entries`, `--archive-max-directory-bytes`,
 `--archive-max-metadata-bytes`, `--archive-max-lzma-dictionary-bytes`, or
-`--archive-max-zstd-window-bytes`. Values are counts/bytes; `none` disables a budget.
+`--archive-max-zstd-window-bytes`. Values are counts or bytes (`64MiB`, `512K` and so on); `none` disables a budget.
+`--max-ratio N|none` overrides the policy's compression-ratio limit (default 100).
 These bound specific resources, not total process memory or CPU time. Custom
 compression-registry implementations must enforce their own decoder budgets.
 
