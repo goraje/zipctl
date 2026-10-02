@@ -101,7 +101,7 @@ def _render_inspection(
 def cmd_inspect(args: InspectArgs, ctx: Context) -> int:
     policy = load_policy(args, ctx)
     destination = os.path.abspath(args.destination or os.getcwd())
-    with open_archive(args.archive) as zf:
+    with open_archive(args.archive, ctx) as zf:
         result = zf.inspect(destination, policy)
     errors = sum(v.action is ViolationAction.ERROR for v in result.violations)
     if args.json:

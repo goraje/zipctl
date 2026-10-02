@@ -40,7 +40,6 @@ from zipctl.cli.commands.helpers.progress import (
 )
 from zipctl.cli.context import Context
 from zipctl.cli.errors import EXIT_OK, CliError, UsageError, os_error_text
-from zipctl.cli.limits import current_limits
 from zipctl.cli.methods import (
     COMPRESSION,
     NO_ENCRYPTION,
@@ -50,6 +49,7 @@ from zipctl.cli.methods import (
     require_level,
 )
 from zipctl.cli.output import printable
+from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.file import ZipFile
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.shared import ZIP_MAX_COMMENT
@@ -101,7 +101,9 @@ def _describe(zf: ZipFile, first: int) -> list[Added]:
     ]
 
 
-def _check_target(args: CreateArgs, entries: list[Entry]) -> tuple[bool, list[Entry]]:
+def _check_target(
+    args: CreateArgs, entries: list[Entry], ctx: Context
+) -> tuple[bool, list[Entry]]:
     """Refuse an archive that may not be written.
 
     Returns whether it is appended to, and the entries still to add: a
@@ -116,7 +118,7 @@ def _check_target(args: CreateArgs, entries: list[Entry]) -> tuple[bool, list[En
         )
     if not (args.append and exists):
         return False, entries
-    with open_archive(args.archive) as existing:
+    with open_archive(args.archive, ctx) as existing:
         present = existing.NameToInfo
         clashes = [e.arcname for e in entries if not e.is_dir and e.arcname in present]
         new = [e for e in entries if e.arcname not in present]
@@ -139,6 +141,7 @@ class CreateJob:
     compression: int
     level: int | None
     comment: bytes | None
+    limits: ArchiveLimits
 
 
 def _write_archive(job: CreateJob, renderer: ProgressRenderer | None) -> list[Added]:
@@ -150,7 +153,7 @@ def _write_archive(job: CreateJob, renderer: ProgressRenderer | None) -> list[Ad
             compression=job.compression,
             compresslevel=job.level,
             strict_timestamps=False,
-            limits=current_limits.get(),
+            limits=job.limits,
         ) as zf:
             first = len(zf.infolist())
             if job.comment is not None:
@@ -191,7 +194,7 @@ def cmd_create(args: CreateArgs, ctx: Context) -> int:
     collector = Collector(args.chdir, args.archive, args.exclude, args.symlinks)
     for given in args.paths:
         collector.add_path(given)
-    appending, entries = _check_target(args, collector.entries)
+    appending, entries = _check_target(args, collector.entries, ctx)
 
     assignment = plan.assign([e.arcname for e in entries if not e.is_dir])
     if not output.quiet:
@@ -226,6 +229,7 @@ def cmd_create(args: CreateArgs, ctx: Context) -> int:
         compression=COMPRESSION[args.compression],
         level=args.level,
         comment=comment,
+        limits=ctx.limits,
     )
     with progress_renderer(ctx.stderr, args.progress) as renderer:
         members = _write_archive(job, renderer)

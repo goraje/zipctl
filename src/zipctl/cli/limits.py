@@ -1,48 +1,52 @@
-"""Per-command archive budgets, also used by nested archive-opening helpers."""
+"""Per-command archive budgets, set from options and carried on the Context."""
 
 import argparse
-from contextvars import ContextVar
+import re
 from dataclasses import fields
 from typing import cast
 
 from zipctl.limits import ArchiveLimits
 
-DEFAULT_LIMITS = ArchiveLimits(
-    max_entries=100_000,
-    max_directory_bytes=64 << 20,
-    max_metadata_bytes=32 << 20,
-    max_lzma_dictionary_bytes=64 << 20,
-    max_zstd_window_bytes=64 << 20,
-)
-current_limits: ContextVar[ArchiveLimits] = ContextVar(
-    "archive_limits", default=DEFAULT_LIMITS
-)
+DEFAULT_LIMITS = ArchiveLimits()
+
+_UNITS = {"": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+_AMOUNT = re.compile(r"(\d+)\s*([kmg]?)(?:i?b)?", re.IGNORECASE)
 
 
 def _budget(value: str) -> int | None:
-    if value == "none":
+    if value.lower() == "none":
         return None
-    try:
-        number = int(value)
-    except ValueError:
+    match = _AMOUNT.fullmatch(value.strip())
+    if match is None:
         raise argparse.ArgumentTypeError(
-            "expected a non-negative integer or 'none'"
-        ) from None
-    if number < 0:
-        raise argparse.ArgumentTypeError("budget must be non-negative")
-    return number
+            "expected a non-negative integer, a size such as 64MiB, or 'none'"
+        )
+    return int(match[1]) * _UNITS[match[2].lower()]
+
+
+def _human(number: int | None) -> str:
+    if number is None:
+        return "none"
+    for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+        if number >= size and number % size == 0:
+            return f"{number // size}{unit}"
+    return str(number)
 
 
 def add_limit_options(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_argument_group(
+        "resource budgets",
+        "Sizes take K/M/G (binary) suffixes; 'none' disables a budget.",
+    )
     for field in fields(DEFAULT_LIMITS):
         default = cast(int | None, getattr(DEFAULT_LIMITS, field.name))
-        parser.add_argument(
+        group.add_argument(
             "--archive-" + field.name.replace("_", "-"),
             dest="archive_" + field.name,
             type=_budget,
             default=default,
             metavar="N|none",
-            help=f"archive resource budget ({field.name}). Default: {default}",
+            help=f"{field.name.replace('_', ' ')}. Default: {_human(default)}",
         )
 
 

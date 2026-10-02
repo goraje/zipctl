@@ -103,7 +103,7 @@ def _test_members(
 
 def cmd_test(args: TestArgs, ctx: Context) -> int:
     with progress_renderer(ctx.stderr, args.progress) as renderer:
-        with open_archive(args.archive) as zf:
+        with open_archive(args.archive, ctx) as zf:
             pool = password_pool(PasswordOptions.from_args(args), ctx)
             infos = select_infos(zf.infolist(), args.members)
             results = _test_members(zf, infos, pool, renderer)

@@ -33,7 +33,7 @@ class DecryptArgs(CopyArgs, PasswordArgs, Protocol):
 def cmd_decrypt(args: DecryptArgs, ctx: Context) -> int:
     job = copy_job(args)
     check_paths(job)
-    with open_archive(job.input) as src:
+    with open_archive(job.input, ctx) as src:
         infos = src.infolist()
         encrypted = [info.filename for info in infos if info.is_encrypted]
         if not encrypted:

@@ -12,9 +12,9 @@ from zipctl.cli.commands.helpers.copying.targets import (
     describe_failure,
 )
 from zipctl.cli.errors import EXIT_FAILURE, CliError
-from zipctl.cli.limits import current_limits
 from zipctl.cli.methods import method_of
 from zipctl.cli.output import printable
+from zipctl.limits import ArchiveLimits
 from zipctl.zipfile.file import ZipFile
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.shared import MASK_COMPRESS_OPTIONS
@@ -28,10 +28,11 @@ def verify_copy(
     infos: Sequence[ZipInfo],
     targets: Sequence[Target],
     copied: Sequence[Copied],
+    limits: ArchiveLimits,
 ) -> None:
     """Read the new archive back; raise if it differs from what was intended."""
     try:
-        out = ZipFile(path, limits=current_limits.get())
+        out = ZipFile(path, limits=limits)
     except Exception as exc:
         raise CliError(
             f"the new archive cannot be read back: {describe_failure(exc)}"

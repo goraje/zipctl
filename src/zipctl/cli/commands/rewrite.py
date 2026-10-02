@@ -52,7 +52,7 @@ def cmd_rewrite(args: RewriteArgs, ctx: Context) -> int:
         raise UsageError("--level needs --compression")
     encryption = EncryptionOptions.from_args(args)
     plan = build_plan(encryption, ctx)
-    with open_archive(job.input) as src:
+    with open_archive(job.input, ctx) as src:
         infos = src.infolist()
         assignment = plan.assign([info.filename for info in infos if not info.is_dir()])
         if not job.report.quiet:

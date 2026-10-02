@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from zipctl.cli.context import Context
 from zipctl.cli.errors import CliError, os_error_text
-from zipctl.cli.limits import current_limits
 from zipctl.cli.output import printable
 from zipctl.exceptions import BadZipFile
 from zipctl.limits import ArchiveResourceLimitError
@@ -14,9 +14,9 @@ __all__ = ["CHUNK", "open_archive"]
 CHUNK = 1 << 20  # bytes read at a time when streaming a member
 
 
-def open_archive(path: str) -> ZipFile:
+def open_archive(path: str, ctx: Context) -> ZipFile:
     try:
-        return ZipFile(path, limits=current_limits.get())
+        return ZipFile(path, limits=ctx.limits)
     except ArchiveResourceLimitError as exc:
         raise CliError(
             f"{printable(path)}: archive resource limit exceeded ({exc})"

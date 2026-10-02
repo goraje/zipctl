@@ -180,7 +180,7 @@ def cmd_extract(args: ExtractArgs, ctx: Context) -> int:
     output = OutputOptions.from_args(args)
     policy = None if args.no_policy else _extraction_policy(args, ctx)
     destination = args.destination or os.getcwd()
-    with open_archive(args.archive) as zf:
+    with open_archive(args.archive, ctx) as zf:
         patterns = [*args.members, *args.match]
         members = select_infos(zf.infolist(), patterns) if patterns else None
         pool = password_pool(PasswordOptions.from_args(args), ctx)

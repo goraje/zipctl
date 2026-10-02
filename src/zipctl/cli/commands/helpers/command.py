@@ -12,7 +12,7 @@ from typing_extensions import override
 from zipctl.cli.context import Context
 from zipctl.cli.errors import UsageError
 from zipctl.cli.formatter import HelpFormatter
-from zipctl.cli.limits import add_limit_options, current_limits, limits_from_args
+from zipctl.cli.limits import add_limit_options, limits_from_args
 
 __all__ = ["CommandsAction", "Handler", "Subparsers", "add_command", "add_subcommands"]
 
@@ -52,14 +52,10 @@ def add_command(
 
         def run(args: argparse.Namespace, ctx: Context) -> int:
             try:
-                limits = limits_from_args(args)
+                ctx.limits = limits_from_args(args)
             except ValueError as exc:
                 raise UsageError(str(exc)) from None
-            token = current_limits.set(limits)
-            try:
-                return handler(cast("_Args", args), ctx)
-            finally:
-                current_limits.reset(token)
+            return handler(cast("_Args", args), ctx)
 
         parser.set_defaults(handler=run)
     return parser

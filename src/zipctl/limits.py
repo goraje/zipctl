@@ -10,19 +10,22 @@ class ArchiveResourceLimitError(Exception):
 
 @dataclass(frozen=True)
 class ArchiveLimits:
-    """Optional byte/count limits; ``None`` disables the corresponding budget.
+    """Byte/count limits with finite defaults; ``None`` disables a budget.
 
+    The CLI uses these same defaults, so library and command line agree.
     Metadata counts encoded names, extra fields and comments, including the
     archive comment. Decoder budgets cover built-in LZMA and Zstandard methods;
     custom registry entries are responsible for their own memory use.
     Zstandard windows must be powers of two between 1 KiB and 2 GiB.
+    These are parser budgets; :class:`ExtractPolicy` separately limits what
+    extraction may write.
     """
 
-    max_entries: int | None = None
-    max_directory_bytes: int | None = None
-    max_metadata_bytes: int | None = None
-    max_lzma_dictionary_bytes: int | None = 1 << 30
-    max_zstd_window_bytes: int | None = None
+    max_entries: int | None = 100_000
+    max_directory_bytes: int | None = 64 << 20
+    max_metadata_bytes: int | None = 32 << 20
+    max_lzma_dictionary_bytes: int | None = 64 << 20
+    max_zstd_window_bytes: int | None = 64 << 20
 
     def __post_init__(self) -> None:
         for field in fields(self):

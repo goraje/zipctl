@@ -141,7 +141,7 @@ def _list_long(ctx: Context, zf: ZipFile, infos: list[ZipInfo]) -> None:
 
 
 def cmd_list(args: ListArgs, ctx: Context) -> int:
-    with open_archive(args.archive) as zf:
+    with open_archive(args.archive, ctx) as zf:
         infos = select_infos(zf.infolist(), args.members)
         if args.json:
             _list_json(ctx, zf, args.archive, infos)

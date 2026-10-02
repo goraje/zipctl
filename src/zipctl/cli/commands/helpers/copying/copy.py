@@ -206,6 +206,6 @@ def run_copy(
             dst.comment = src.comment
             copied = _copy(src, dst, infos, passwords, targets, compress_type, level)
         if job.verify:
-            verify_copy(scratch, src, infos, targets, copied)
+            verify_copy(scratch, src, infos, targets, copied, ctx.limits)
     report_copy(ctx, job, verb, copied)
     return EXIT_OK

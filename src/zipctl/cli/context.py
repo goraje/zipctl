@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import BinaryIO, TextIO
 
 from zipctl.cli.errors import UsageError
+from zipctl.limits import ArchiveLimits
 
 __all__ = ["Context"]
 
@@ -21,6 +22,7 @@ class Context:
     stdout: TextIO
     stderr: TextIO
     environ: Mapping[str, str]
+    limits: ArchiveLimits = field(default_factory=ArchiveLimits)
     _stdin_user: str | None = field(default=None, init=False, repr=False)
     warned: bool = field(default=False, init=False, repr=False)
 

@@ -50,7 +50,7 @@ def cmd_encrypt(args: EncryptArgs, ctx: Context) -> int:
     require_aes_for_version(args.wz_aes_version, [method])
     if passwords.prompt:
         require_tty_for_prompt(ctx)
-    with open_archive(job.input) as src:
+    with open_archive(job.input, ctx) as src:
         infos = src.infolist()
         already = [info for info in infos if info.is_encrypted]
         if already:

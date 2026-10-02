@@ -67,7 +67,7 @@ def _check(
 
 
 def cmd_check_password(args: CheckPasswordArgs, ctx: Context) -> int:
-    with open_archive(args.archive) as zf:
+    with open_archive(args.archive, ctx) as zf:
         result = _check(zf, select_infos(zf.infolist(), args.members), args, ctx)
 
     checks = result.members
