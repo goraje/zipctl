@@ -6,7 +6,7 @@ import zlib
 from collections.abc import Sequence
 
 from zipctl.cli.archive import CHUNK
-from zipctl.cli.commands.helpers.copying.targets import (
+from zipctl.cli.commands.helpers.copy_targets import (
     Copied,
     Target,
     describe_failure,

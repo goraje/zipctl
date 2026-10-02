@@ -236,3 +236,17 @@ def test_a_link_target_that_is_not_utf8_is_refused(
 @pytest.mark.usefixtures("tree")
 def test_an_unknown_mode_is_a_usage_error(cli: CliRunner, workdir: Path) -> None:
     assert make(cli, workdir, "--symlinks", "chase")[0] == 2
+
+
+def test_following_a_link_out_of_the_tree_warns(cli: CliRunner, workdir: Path) -> None:
+    root = workdir / "t"
+    root.mkdir()
+    secret = workdir / "secret.txt"
+    secret.write_bytes(b"private")
+    (root / "inside.txt").write_bytes(b"x")
+    (root / "leak").symlink_to(secret)
+    (root / "near").symlink_to("inside.txt")
+    code, _, err = make(cli, workdir)
+    assert code == 0, err
+    assert f"t/leak is a symbolic link to {secret.resolve()}, outside" in err
+    assert "t/near" not in err

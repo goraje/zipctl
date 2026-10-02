@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, build_password_pool
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_pool import PasswordPool, build_password_pool
+from zipctl.cli.commands.helpers.password_sources import (
     WAYS_TO_GIVE,
     password_bytes,
     prompt_password,

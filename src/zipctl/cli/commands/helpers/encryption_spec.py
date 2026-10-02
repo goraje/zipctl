@@ -6,8 +6,8 @@ import json
 from collections.abc import Sequence
 from typing import cast
 
-from zipctl.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.encryption_plan import EncryptionPlan, Rule
+from zipctl.cli.commands.helpers.password_sources import (
     PasswordReaders,
     password_bytes,
 )

@@ -104,8 +104,8 @@ def test_data_of_a_different_length_is_caught_even_if_the_checksum_agrees(
         def crc32(_data: bytes, _value: int = 0) -> int:
             return 0
 
-    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.copy.zlib", NoChecksum)
-    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.verify.zlib", NoChecksum)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copy.zlib", NoChecksum)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copy_verify.zlib", NoChecksum)
     drop_last_byte(monkeypatch)
     code, _, stderr = run(*RECOMPRESS, str(source), str(workdir / "out.zip"))
     assert code == 1, stderr
@@ -283,7 +283,7 @@ def test_a_lost_archive_comment_is_caught(
         def comment(self, comment: bytes) -> None:
             pass
 
-    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.copy.ZipFile", Forgetful)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copy.ZipFile", Forgetful)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
     assert code == 1
     assert "the archive comment differs" in stderr
@@ -304,7 +304,7 @@ def test_an_unreadable_output_is_reported(
             raise BadZipFile("File is not a zip file")
         return real(path, mode)
 
-    monkeypatch.setattr("zipctl.cli.commands.helpers.copying.verify.ZipFile", flaky)
+    monkeypatch.setattr("zipctl.cli.commands.helpers.copy_verify.ZipFile", flaky)
     code, _, stderr = run("encrypt", str(source), str(workdir / "out.zip"))
     assert code == 1
     assert "cannot be read back: File is not a zip file" in stderr

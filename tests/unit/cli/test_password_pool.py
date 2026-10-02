@@ -8,7 +8,7 @@ from typing import cast
 
 from tests.unit.cli.conftest import new_context
 from zipctl import ZIP_CRYPTO
-from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
+from zipctl.cli.commands.helpers.password_pool import PasswordPool, PasswordProblem
 from zipctl.zipfile.file import ZipFile
 from zipctl.zipfile.info import ZipInfo
 from zipctl.zipfile.password import (

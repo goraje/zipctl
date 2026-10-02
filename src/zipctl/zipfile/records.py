@@ -342,7 +342,7 @@ def _read_directory_entry(
     info.compress_size = header[_CD_COMPRESSED_SIZE]
     info.file_size = header[_CD_UNCOMPRESSED_SIZE]
     if info.extract_version > MAX_EXTRACT_VERSION:
-        raise NotImplementedError("zip file version %.1f" % (info.extract_version / 10))
+        raise NotImplementedError(f"zip file version {info.extract_version / 10:.1f}")
     info.volume = header[_CD_DISK_NUMBER_START]
     info.internal_attr = header[_CD_INTERNAL_FILE_ATTRIBUTES]
     info.external_attr = header[_CD_EXTERNAL_FILE_ATTRIBUTES]
@@ -477,8 +477,7 @@ def read_local_header(
         raise BadZipFile("Invalid local filename encoding") from exc
     if header_name != info.orig_filename:
         raise BadZipFile(
-            "File name in directory %r and header %r differ."
-            % (info.orig_filename, name)
+            f"File name in directory {info.orig_filename!r} and header {name!r} differ."
         )
 
 

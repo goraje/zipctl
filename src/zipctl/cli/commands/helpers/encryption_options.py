@@ -7,14 +7,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
-from zipctl.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
-from zipctl.cli.commands.helpers.encryption.spec import plan_from_spec
-from zipctl.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.encryption_plan import EncryptionPlan, Rule
+from zipctl.cli.commands.helpers.encryption_spec import plan_from_spec
+from zipctl.cli.commands.helpers.password_options import (
     PasswordArgs,
     PasswordOptions,
     given_password,
 )
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_sources import (
     readers_for,
     require_tty_for_prompt,
 )

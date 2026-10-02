@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from zipctl.cli.commands.helpers.copying.options import CopyJob
-from zipctl.cli.commands.helpers.copying.targets import Copied
+from zipctl.cli.commands.helpers.copy_options import CopyJob
+from zipctl.cli.commands.helpers.copy_targets import Copied
 from zipctl.cli.context import Context
 from zipctl.cli.output import JsonValue, count, printable, write_json
 

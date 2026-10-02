@@ -5,6 +5,7 @@
 <p align="center">
 	<img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-245bcf?style=flat-square&logo=python&logoColor=white" alt="Supported Python versions: 3.10, 3.11, 3.12, 3.13, 3.14">
 	<img src="https://img.shields.io/badge/license-MIT-245bcf?style=flat-square" alt="License: MIT">
+	<img src="https://img.shields.io/badge/license-PSF--2.0-245bcf?style=flat-square" alt="License: PSF-2.0">
 </p>
 
 `zipctl` is a standalone ZIP library derived from CPython's `zipfile`

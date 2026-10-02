@@ -7,15 +7,15 @@ from collections.abc import Sequence
 
 from zipctl.cli.archive import CHUNK
 from zipctl.cli.atomic import replacing
-from zipctl.cli.commands.helpers.copying.options import CopyJob
-from zipctl.cli.commands.helpers.copying.report import report_copy
-from zipctl.cli.commands.helpers.copying.targets import (
+from zipctl.cli.commands.helpers.copy_options import CopyJob
+from zipctl.cli.commands.helpers.copy_report import report_copy
+from zipctl.cli.commands.helpers.copy_targets import (
     Copied,
     Target,
     describe_failure,
 )
-from zipctl.cli.commands.helpers.copying.verify import verify_copy
-from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
+from zipctl.cli.commands.helpers.copy_verify import verify_copy
+from zipctl.cli.commands.helpers.password_pool import PasswordPool, PasswordProblem
 from zipctl.cli.context import Context
 from zipctl.cli.errors import EXIT_OK, CliError
 from zipctl.cli.methods import (

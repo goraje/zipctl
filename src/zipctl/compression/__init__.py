@@ -96,11 +96,9 @@ class Registry:
     def check_compression(self, compression: int) -> None:
         if compression in self._registry:
             return
-        if compression in self._required_modules:
-            raise RuntimeError(
-                "Compression requires the (missing) %s module"
-                % self._required_modules[compression]
-            )
+        module = self._required_modules.get(compression)
+        if module is not None:
+            raise RuntimeError(f"Compression requires the (missing) {module} module")
         raise NotImplementedError("That compression method is not supported")
 
     def get_compressor(

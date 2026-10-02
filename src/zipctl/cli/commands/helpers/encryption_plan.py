@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_sources import (
     prompt_new_password,
     prompt_password,
 )

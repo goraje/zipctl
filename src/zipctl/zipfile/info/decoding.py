@@ -81,7 +81,7 @@ def decode_wz_aes_extra(info: ZipInfo, ln: int, extra: bytes) -> None:
         BadZipFile: If *ln* is not 7.
     """
     if ln != 7:
-        raise BadZipFile("Corrupt extra field %04x (size=%d)" % (EXTRA_WZ_AES, ln))
+        raise BadZipFile(f"Corrupt extra field {EXTRA_WZ_AES:04x} (size={ln})")
     (
         info.aes_extra.wz_aes_version,
         info.aes_extra.wz_aes_vendor_id,
@@ -119,7 +119,7 @@ def decode_extra(info: ZipInfo, filename_crc: int) -> None:
     while len(extra) >= 4:
         tp, ln = unpack("<HH", extra[:4])
         if ln + 4 > len(extra):
-            raise BadZipFile("Corrupt extra field %04x (size=%d)" % (tp, ln))
+            raise BadZipFile(f"Corrupt extra field {tp:04x} (size={ln})")
         if tp == EXTRA_UNICODE_PATH:
             # Unicode Path Extra Field — needs filename_crc, handle inline
             data = extra[4 : ln + 4]

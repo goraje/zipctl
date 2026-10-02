@@ -11,7 +11,7 @@ import pytest
 from typing_extensions import override
 
 from tests.unit.cli.test_password_pool import FakeZip
-from zipctl.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.password_options import (
     OldPasswordArgs,
     PasswordArgs,
     PasswordOptions,
@@ -21,7 +21,7 @@ from zipctl.cli.commands.helpers.passwords.options import (
     old_password_pool,
     single_password,
 )
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_sources import (
     ENV_VAR,
     OLD_ENV_VAR,
     prompt_new_password,

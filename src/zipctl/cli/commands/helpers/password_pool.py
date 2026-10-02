@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from enum import Enum
 
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_sources import (
     WAYS_TO_GIVE,
     password_bytes,
     prompt_password,

@@ -10,10 +10,10 @@ import pytest
 from typing_extensions import override
 
 from tests.unit.cli.conftest import new_context
-from zipctl.cli.commands.helpers.encryption.options import _split_protect
-from zipctl.cli.commands.helpers.encryption.plan import EncryptionPlan, Rule
-from zipctl.cli.commands.helpers.encryption.spec import plan_from_spec
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.encryption_options import _split_protect
+from zipctl.cli.commands.helpers.encryption_plan import EncryptionPlan, Rule
+from zipctl.cli.commands.helpers.encryption_spec import plan_from_spec
+from zipctl.cli.commands.helpers.password_sources import (
     PasswordReaders,
     readers_for,
 )

@@ -6,26 +6,26 @@ from typing import Protocol
 
 from zipctl.cli.archive import open_archive
 from zipctl.cli.commands.helpers.command import Subparsers, add_command
-from zipctl.cli.commands.helpers.copying.copy import run_copy
-from zipctl.cli.commands.helpers.copying.options import (
+from zipctl.cli.commands.helpers.copy import run_copy
+from zipctl.cli.commands.helpers.copy_options import (
     CopyArgs,
     add_copy_options,
     check_paths,
     copy_job,
 )
-from zipctl.cli.commands.helpers.copying.targets import PLAIN, target_for_method
-from zipctl.cli.commands.helpers.encryption.options import (
+from zipctl.cli.commands.helpers.copy_targets import PLAIN, target_for_method
+from zipctl.cli.commands.helpers.encryption_options import (
     add_wz_aes_version,
     require_aes_for_version,
 )
-from zipctl.cli.commands.helpers.encryption.plan import warn_if_weak
-from zipctl.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.encryption_plan import warn_if_weak
+from zipctl.cli.commands.helpers.password_options import (
     PasswordArgs,
     PasswordOptions,
     add_password_options,
     given_password,
 )
-from zipctl.cli.commands.helpers.passwords.sources import (
+from zipctl.cli.commands.helpers.password_sources import (
     prompt_new_password,
     require_tty_for_prompt,
 )

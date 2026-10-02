@@ -1027,8 +1027,8 @@ def test_the_readme_spec_example_is_valid(workdir: Path) -> None:
     import io
     import re
 
-    from zipctl.cli.commands.helpers.encryption.spec import plan_from_spec
-    from zipctl.cli.commands.helpers.passwords.sources import readers_for
+    from zipctl.cli.commands.helpers.encryption_spec import plan_from_spec
+    from zipctl.cli.commands.helpers.password_sources import readers_for
     from zipctl.cli.context import Context
 
     readme = Path(__file__).resolve().parents[3] / "README.md"

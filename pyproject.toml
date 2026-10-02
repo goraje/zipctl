@@ -70,6 +70,7 @@ lint.select = [
     "PYI",
     "SLF001",
     "TID251",
+    "UP031",
     "W",
 ]
 
@@ -127,7 +128,3 @@ extend-ignore-re = [
     "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",
     "(#|//)\\s*spellchecker:ignore-next-line\\n.*",
 ]
-
-# CLI tests run `zipctl` as a subprocess; without this their lines go uncounted.
-[tool.coverage.run]
-patch = ["subprocess"]

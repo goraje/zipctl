@@ -429,7 +429,7 @@ def test_duplicate_keys_inside_a_rule_are_rejected() -> None:
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
 def test_non_finite_json_constants_are_rejected(constant: str) -> None:
     with pytest.raises(PolicyConfigError, match="not allowed"):
-        policy_from_json('{"max_compression_ratio": %s}' % constant)
+        policy_from_json(f'{{"max_compression_ratio": {constant}}}')
 
 
 @pytest.mark.parametrize("text", ["[]", '"x"', "null", "3"])

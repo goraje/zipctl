@@ -7,7 +7,7 @@ from typing import Protocol
 from zipctl.cli.archive import open_archive
 from zipctl.cli.commands.helpers.command import Subparsers, add_command
 from zipctl.cli.commands.helpers.output_options import OutputArgs, add_output_options
-from zipctl.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.password_options import (
     PasswordArgs,
     PasswordOptions,
     add_password_options,

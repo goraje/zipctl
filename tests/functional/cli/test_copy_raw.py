@@ -14,8 +14,8 @@ import zipctl
 from tests.functional.cli.rewrite_support import PASSWORD, PW
 from zipctl import ZipFile
 from zipctl.cli import main
-from zipctl.cli.commands.helpers.copying.copy import _can_copy_raw
-from zipctl.cli.commands.helpers.copying.targets import PLAIN, Target, target_for_method
+from zipctl.cli.commands.helpers.copy import _can_copy_raw
+from zipctl.cli.commands.helpers.copy_targets import PLAIN, Target, target_for_method
 from zipctl.cli.methods import ENCRYPTION_METHODS
 from zipctl.compression import registry
 from zipctl.zipfile.info import ZipInfo

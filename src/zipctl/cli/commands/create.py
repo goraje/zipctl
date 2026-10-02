@@ -11,26 +11,26 @@ from zipctl.cli.archive import open_archive
 from zipctl.cli.atomic import replacing
 from zipctl.cli.commands.helpers.collect import Collector, Entry
 from zipctl.cli.commands.helpers.command import Subparsers, add_command
-from zipctl.cli.commands.helpers.copying.targets import PLAIN, Target, target_for_method
+from zipctl.cli.commands.helpers.copy_targets import PLAIN, Target, target_for_method
 from zipctl.cli.commands.helpers.create_report import (
     Added,
     Planned,
     report_created,
     report_dry_run,
 )
-from zipctl.cli.commands.helpers.encryption.options import (
+from zipctl.cli.commands.helpers.encryption_options import (
     EncryptionArgs,
     EncryptionOptions,
     add_encryption_options,
     build_plan,
 )
-from zipctl.cli.commands.helpers.encryption.plan import PlanAssignment, warn_if_weak
+from zipctl.cli.commands.helpers.encryption_plan import PlanAssignment, warn_if_weak
 from zipctl.cli.commands.helpers.output_options import (
     OutputArgs,
     OutputOptions,
     add_output_options,
 )
-from zipctl.cli.commands.helpers.passwords.options import add_password_options
+from zipctl.cli.commands.helpers.password_options import add_password_options
 from zipctl.cli.commands.helpers.progress import (
     ProgressArgs,
     ProgressRenderer,
@@ -194,6 +194,12 @@ def cmd_create(args: CreateArgs, ctx: Context) -> int:
     collector = Collector(args.chdir, args.archive, args.exclude, args.symlinks)
     for given in args.paths:
         collector.add_path(given)
+    for link, target in collector.escaping:
+        ctx.warn(
+            f"{printable(link)} is a symbolic link to {printable(target)}, outside "
+            "the directory being added; its content is stored (--symlinks store "
+            "keeps the link instead)"
+        )
     appending, entries = _check_target(args, collector.entries, ctx)
 
     assignment = plan.assign([e.arcname for e in entries if not e.is_dir])

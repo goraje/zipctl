@@ -16,13 +16,13 @@ from zipctl.cli.commands.helpers.output_options import (
     OutputOptions,
     add_output_options,
 )
-from zipctl.cli.commands.helpers.passwords.options import (
+from zipctl.cli.commands.helpers.password_options import (
     PasswordArgs,
     PasswordOptions,
     add_password_options,
     password_pool,
 )
-from zipctl.cli.commands.helpers.passwords.pool import PasswordPool, PasswordProblem
+from zipctl.cli.commands.helpers.password_pool import PasswordPool, PasswordProblem
 from zipctl.cli.commands.helpers.policy_options import (
     PolicyArgs,
     add_policy_options,

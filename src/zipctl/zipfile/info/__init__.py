@@ -207,25 +207,23 @@ class ZipInfo:
         Returns:
             A string of the form ``<ZipInfo filename=... [fields...]>``.
         """
-        result = ["<%s filename=%r" % (self.__class__.__name__, self.filename)]
+        result = [f"<{self.__class__.__name__} filename={self.filename!r}"]
         if self.compress_type != ZIP_STORED:
-            result.append(
-                " compress_type=%s"
-                % compressor_names.get(self.compress_type, self.compress_type)
-            )
+            name = compressor_names.get(self.compress_type, self.compress_type)
+            result.append(f" compress_type={name}")
         hi = self.external_attr >> 16
         lo = self.external_attr & 0xFFFF
         if hi:
-            result.append(" filemode=%r" % stat.filemode(hi))
+            result.append(f" filemode={stat.filemode(hi)!r}")
         if lo:
-            result.append(" external_attr=%#x" % lo)
+            result.append(f" external_attr={lo:#x}")
         isdir = self.is_dir()
         if not isdir or self.file_size:
-            result.append(" file_size=%r" % self.file_size)
+            result.append(f" file_size={self.file_size!r}")
         if (not isdir or self.compress_size) and (
             self.compress_type != ZIP_STORED or self.file_size != self.compress_size
         ):
-            result.append(" compress_size=%r" % self.compress_size)
+            result.append(f" compress_size={self.compress_size!r}")
         result.append(">")
         return "".join(result)
 

@@ -86,6 +86,8 @@ class Collector:
             self._archive_stat = None
         self.entries: list[Entry] = []
         self.skipped: list[tuple[str, str]] = []
+        # Followed links whose file lies outside the directory being added.
+        self.escaping: list[tuple[str, str]] = []
         self._seen: set[str] = set()
         self._exclude: list[tuple[str, Callable[[str], bool]]] = [
             (p, glob_matcher(p.rstrip("/") or p)) for p in exclude
@@ -206,7 +208,17 @@ class Collector:
                 elif reason := _not_a_file(path):
                     self._skip(path, reason)
                 else:
+                    self._note_escape(top, path)
                     self._add(path, arcname, False)
+
+    def _note_escape(self, top: str, path: str) -> None:
+        """Remember a followed link that takes *path* out of the tree at *top*."""
+        if not os.path.islink(path):
+            return
+        target = os.path.realpath(path)
+        root = os.path.realpath(top)
+        if os.path.commonpath([root, target]) != root:
+            self.escaping.append((os.path.normpath(path), target))
 
     def _walk_dirs(self, root: str, dirs: list[str], prefix: str) -> None:
         """Add the directories of one level; *dirs* keeps those to descend into."""
