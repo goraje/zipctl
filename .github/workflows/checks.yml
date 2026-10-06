@@ -1,0 +1,268 @@
+name: compatibility checks
+
+on:
+  workflow_call:
+    inputs:
+      wheel-artifact:
+        description: Existing wheel artifact to validate for this exact commit
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  no-hardlinks:
+    name: Real FAT filesystem publication
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv sync --locked --all-extras
+      - name: Create disposable FAT filesystem
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools
+          truncate -s 64M "$RUNNER_TEMP/zipctl-fat.img"
+          mkfs.vfat "$RUNNER_TEMP/zipctl-fat.img"
+          mkdir "$RUNNER_TEMP/zipctl-fat"
+          sudo mount -o loop,uid="$(id -u)",gid="$(id -g)" "$RUNNER_TEMP/zipctl-fat.img" "$RUNNER_TEMP/zipctl-fat"
+      - run: uv run pytest -v tests/deployment/test_filesystems.py -k real_filesystem
+        env:
+          ZIPCTL_NO_HARDLINK_ROOT: ${{ runner.temp }}/zipctl-fat
+      - if: always()
+        run: |
+          if mountpoint -q "$RUNNER_TEMP/zipctl-fat"; then
+            sudo umount "$RUNNER_TEMP/zipctl-fat"
+          fi
+
+  fips:
+    name: FIPS provider (UBI 9, Python 3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: registry.access.redhat.com/ubi9/python-314
+      env:
+        OPENSSL_FORCE_FIPS_MODE: "1"
+    env:
+      CRYPTOGRAPHY_OPENSSL_NO_LEGACY: "1"
+      ZIPCTL_REQUIRE_FIPS: "1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+      # The PyPI wheel bundles its own OpenSSL; build cryptography against the image's FIPS provider.
+      - run: uv export --locked --all-extras --no-default-groups --group dev --no-emit-project --no-hashes --format requirements-txt -o requirements.txt
+      - run: python -m pip wheel --no-binary cryptography -r requirements.txt -w wheels
+      - run: python -m pip install --no-index wheels/*.whl
+      - run: python -m pip install --no-deps -e .
+      - name: Confirm FIPS mode
+        run: |
+          python -c "from cryptography.hazmat.backends.openssl.backend import backend as b; print(b._fips_enabled, b.openssl_version_text())"
+          python -c "from cryptography.hazmat.backends.openssl.backend import backend as b; raise SystemExit(not b._fips_enabled)"
+      - run: python -m pytest -v tests
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Run the pre-commit hooks
+        run: uv run --locked --all-extras prek run --all-files --show-diff-on-failure
+
+  ty:
+    name: ty
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Run ty check
+        run: uv run --locked --all-extras ty check
+
+  basedpyright:
+    name: basedpyright
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Run basedpyright
+        run: uv run --locked --all-extras basedpyright
+
+  mypy:
+    name: mypy ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Install project and dev dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Run mypy --strict
+        run: uv run mypy --strict src tests
+
+  pytest:
+    name: pytest ${{ matrix.os }} Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    needs: [lint, ty, basedpyright, mypy]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Install project and dev dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Run full applicable suite
+        run: uv run pytest -v tests --cov=src/zipctl --cov-report=term
+
+  wheel:
+    name: Prepare wheel for isolated installation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10.2.0
+      - if: inputs.wheel-artifact == ''
+        run: uv build --wheel
+      - if: inputs.wheel-artifact == ''
+        run: uvx twine check dist/*.whl
+      - if: inputs.wheel-artifact == ''
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: checked-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  installed-wheel:
+    name: installed wheel ${{ matrix.os }}
+    needs: wheel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ inputs.wheel-artifact || 'checked-wheel' }}
+          path: dist
+      - name: Check all Python versions and dependency configurations
+        run: uv run --no-project --python 3.14 python tests/packaging/check_matrix.py --wheel-dir dist
+
+  pytest-windows-7zip:
+    name: 7-zip
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: [lint, ty, basedpyright, mypy]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Verify 7-Zip
+        shell: pwsh
+        run: 7z i
+
+      - name: Install project and dev dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Run 7-Zip interoperability tests
+        run: uv run pytest -v -m windows tests/functional/test_7zip_interop.py tests/functional/cli/test_7zip_cli.py

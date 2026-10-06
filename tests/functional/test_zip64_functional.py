@@ -1,0 +1,309 @@
+"""Functional ZIP64 tests with tiny payloads via patched ZIP64 thresholds.
+
+These tests avoid giant files by monkeypatching ZIP64 limits in runtime modules.
+They validate ZIP64 behavior end-to-end (zipctl, stdlib, and 7-Zip).
+"""
+
+from __future__ import annotations
+
+import shutil
+import struct
+import subprocess
+import zipfile as _stdlib_zipfile
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+from zipctl import ZipFile, ZipInfo
+from zipctl.exceptions import LargeZipFile
+from zipctl.zipfile import shared as shared_mod
+from zipctl.zipfile.shared import (
+    CENTRAL_DIR_SIGNATURE,
+    CENTRAL_DIR_SIZE,
+    CENTRAL_DIR_STRUCT,
+    END_ARCHIVE64_LOCATOR_SIGNATURE,
+    END_ARCHIVE64_SIGNATURE,
+    FILE_HEADER_SIGNATURE,
+    FILE_HEADER_SIZE,
+    FILE_HEADER_STRUCT,
+)
+
+SZ_EXE = shutil.which("7z") or shutil.which("7zz")
+
+
+def _assert_7z_accepts(archive: Path) -> None:
+    """Have 7-Zip test *archive* when it is installed (the Windows CI runners have it).
+
+    Without 7-Zip only this extra check is left out: skipping would hide that
+    the zipctl assertions before it passed.
+    """
+    if SZ_EXE is not None:
+        result = subprocess.run([SZ_EXE, "t", str(archive)], capture_output=True)
+        assert result.returncode == 0, result
+
+
+def _parse_extra_has_zip64(extra: bytes) -> bool:
+    """Return True when extra-data bytes contain ZIP64 tag 0x0001."""
+    pos = 0
+    while pos + 4 <= len(extra):
+        xid, xlen = struct.unpack("<HH", extra[pos : pos + 4])
+        if xid == 0x0001:
+            return True
+        pos += 4 + xlen
+    return False
+
+
+def _first_local_extra(path: Path) -> bytes:
+    return _local_extra(path.read_bytes())
+
+
+def _local_extra(data: bytes) -> bytes:
+    off = data.find(FILE_HEADER_SIGNATURE)
+    assert off >= 0, "local header not found"
+    header = struct.unpack(FILE_HEADER_STRUCT, data[off : off + FILE_HEADER_SIZE])
+    fname_len = header[10]
+    extra_len = header[11]
+    start = off + FILE_HEADER_SIZE + fname_len
+    return data[start : start + extra_len]
+
+
+def _first_central_extra(path: Path) -> bytes:
+    data = path.read_bytes()
+    off = data.find(CENTRAL_DIR_SIGNATURE)
+    assert off >= 0, "central directory not found"
+    cent = struct.unpack(CENTRAL_DIR_STRUCT, data[off : off + CENTRAL_DIR_SIZE])
+    fname_len = cent[12]
+    extra_len = cent[13]
+    start = off + CENTRAL_DIR_SIZE + fname_len
+    return data[start : start + extra_len]
+
+
+class TestZip64Functional:
+    def test_force_zip64_writes_local_zip64_extra(self, tmp_path: Path) -> None:
+        """force_zip64=True should emit ZIP64 extra.
+
+        Even for small data, the local header should include the ZIP64 extra field.
+        """
+        path = tmp_path / "force-local.zip"
+        with ZipFile(path, "w") as zf:
+            with zf.open("tiny.txt", "w", force_zip64=True) as fp:
+                fp.write(b"tiny")
+
+        local_extra = _first_local_extra(path)
+        assert _parse_extra_has_zip64(local_extra)
+        _assert_7z_accepts(path)
+
+    def test_force_zip64_with_allowzip64_false_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "force-denied.zip"
+        with ZipFile(path, "w", allowZip64=False) as zf:
+            with pytest.raises(ValueError, match="force_zip64"):
+                zf.open("x.txt", "w", force_zip64=True)
+
+    def test_patched_limit_triggers_local_and_central_zip64_extra(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Patched low ZIP64 limit should produce ZIP64 extra.
+
+        This must appear in both local and central headers.
+        """
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+
+        path = tmp_path / "zip64-both-extra.zip"
+        with ZipFile(path, "w") as zf:
+            zf.writestr("big.bin", b"A" * 200)
+
+        local_extra = _first_local_extra(path)
+        central_extra = _first_central_extra(path)
+        assert _parse_extra_has_zip64(local_extra)
+        assert _parse_extra_has_zip64(central_extra)
+        _assert_7z_accepts(path)
+
+    def test_allowzip64_false_raises_when_threshold_exceeded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+
+        path = tmp_path / "nozip64.zip"
+        with ZipFile(path, "w", allowZip64=False) as zf:
+            with pytest.raises(LargeZipFile, match="ZIP64"):
+                zf.writestr("too-big.bin", b"B" * 200)
+
+    def test_a_streamed_entry_that_outgrows_the_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+        path = tmp_path / "streamed.zip"
+        with ZipFile(path, "w") as zf:
+            with pytest.raises(RuntimeError, match="ZIP64 limit"):  # noqa: PT012
+                with zf.open("big.bin", "w") as dest:
+                    dest.write(b"C" * 200)
+            zf.writestr("ok.txt", b"ok")
+        with ZipFile(path) as zf:
+            assert zf.namelist() == ["ok.txt"]
+
+    def test_central_offsets_past_the_limit_get_zip64_records(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+        path = tmp_path / "offsets.zip"
+        with ZipFile(path, "w") as zf:
+            for name in ("a.txt", "b.txt", "c.txt"):
+                zf.writestr(name, b"x" * 40)
+        assert END_ARCHIVE64_SIGNATURE in path.read_bytes()
+        with ZipFile(path) as zf:
+            assert zf.read("c.txt") == b"x" * 40
+        _assert_7z_accepts(path)
+
+    def test_stdlib_forced_zip64_is_readable_and_7z_validates(
+        self, tmp_path: Path
+    ) -> None:
+        """Cross-tool check for forced ZIP64 interoperability.
+
+        stdlib writes, zipctl reads, and 7z validates.
+        """
+        path = tmp_path / "stdlib-zip64.zip"
+        with mock.patch.object(_stdlib_zipfile, "ZIP64_LIMIT", -1):
+            with _stdlib_zipfile.ZipFile(path, "w", allowZip64=True) as zf:
+                zf.writestr("s.txt", "stdlib zip64")
+
+        with ZipFile(path, "r") as zf:
+            assert zf.read("s.txt") == b"stdlib zip64"
+
+        _assert_7z_accepts(path)
+
+    def test_patched_filecount_limit_emits_zip64_eocd_records(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Low file-count limit forces ZIP64 EOCD/locator for multi-file archives."""
+        monkeypatch.setattr(shared_mod, "ZIP_FILECOUNT_LIMIT", 2)
+
+        path = tmp_path / "zip64-count.zip"
+        with ZipFile(path, "w") as zf:
+            zf.writestr("a.txt", b"a")
+            zf.writestr("b.txt", b"b")
+            zf.writestr("c.txt", b"c")
+
+        raw = path.read_bytes()
+        assert END_ARCHIVE64_SIGNATURE in raw
+        assert END_ARCHIVE64_LOCATOR_SIGNATURE in raw
+
+        with ZipFile(path, "r") as zf:
+            assert zf.namelist() == ["a.txt", "b.txt", "c.txt"]
+
+        _assert_7z_accepts(path)
+
+
+class TestZip64Refusals:
+    """Without ``allowZip64`` each record that would need ZIP64 is refused."""
+
+    def test_an_entry_past_the_file_count_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP_FILECOUNT_LIMIT", 2)
+        path = tmp_path / "count.zip"
+        with ZipFile(path, "w", allowZip64=False) as zf:
+            zf.writestr("a.txt", b"a")
+            with pytest.raises(LargeZipFile, match="Files count"):
+                zf.writestr("b.txt", b"b")
+        with ZipFile(path) as zf:
+            assert zf.namelist() == ["a.txt"]
+
+    def test_appending_past_the_size_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "append.zip"
+        with ZipFile(path, "w") as zf:
+            zf.writestr("a.txt", b"x" * 100)
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+        with ZipFile(path, "a", allowZip64=False) as zf:
+            with pytest.raises(LargeZipFile, match="Zipfile size"):
+                zf.writestr("b.txt", b"b")
+        with ZipFile(path) as zf:
+            assert zf.namelist() == ["a.txt"]
+
+    def test_a_central_directory_past_the_offset_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "offset.zip"
+        with ZipFile(path, "w") as zf:
+            zf.writestr("a.txt", b"x" * 100)
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+        zf = ZipFile(path, "a", allowZip64=False)
+        zf.comment = b"changed"
+        with pytest.raises(LargeZipFile, match="Central directory offset"):
+            zf.close()
+
+    def test_a_central_directory_past_the_size_limit_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 300)
+        zf = ZipFile(tmp_path / "size.zip", "w", allowZip64=False)
+        info = ZipInfo("a.txt")
+        info.comment = b"c" * 400  # only the central directory carries it
+        zf.writestr(info, b"a")
+        with pytest.raises(LargeZipFile, match="Central directory size"):
+            zf.close()
+
+    def test_a_local_header_uses_zip64_only_for_sizes_past_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 64)
+        small, big = ZipInfo("small.txt"), ZipInfo("big.txt")
+        small.file_size = small.compress_size = 64
+        big.file_size = 65
+        small.CRC = big.CRC = 0
+        assert not _parse_extra_has_zip64(_local_extra(small.FileHeader()))
+        assert _parse_extra_has_zip64(_local_extra(big.FileHeader()))
+        with pytest.raises(LargeZipFile, match="Filesize"):
+            big.FileHeader(zip64=False)
+        small.compress_size = 65
+        assert _parse_extra_has_zip64(_local_extra(small.FileHeader()))
+
+
+class TestZip64Estimate:
+    """ZIP64 is chosen for a local header before its sizes are known."""
+
+    @pytest.mark.parametrize(("limit", "zip64"), [(104, True), (105, False)])
+    def test_a_declared_size_leaves_room_for_compression_overhead(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        limit: int,
+        zip64: bool,
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", limit)
+        path = tmp_path / "declared.zip"
+        info = ZipInfo("a.bin")
+        info.file_size = 100  # 5 bytes of room on top: 105
+        with ZipFile(path, "w") as zf, zf.open(info, "w") as dest:
+            dest.write(b"x" * 100)
+        assert _parse_extra_has_zip64(_first_local_extra(path)) is zip64
+
+    def test_the_room_is_rounded_down(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", 103)
+        path = tmp_path / "rounded.zip"
+        info = ZipInfo("a.bin")
+        info.file_size = 99  # 4 bytes of room on top: 103
+        with ZipFile(path, "w") as zf, zf.open(info, "w") as dest:
+            dest.write(b"x" * 99)
+        assert not _parse_extra_has_zip64(_first_local_extra(path))
+
+    @pytest.mark.parametrize(("limit", "zip64"), [(73, True), (74, False)])
+    def test_a_copied_member_leaves_room_for_encryption(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        limit: int,
+        zip64: bool,
+    ) -> None:
+        source = tmp_path / "source.zip"
+        with ZipFile(source, "w") as zf:
+            zf.writestr("a.txt", b"x" * 10)
+        monkeypatch.setattr(shared_mod, "ZIP64_LIMIT", limit)
+        path = tmp_path / "copy.zip"
+        with ZipFile(source) as src, ZipFile(path, "w") as zf:
+            zf.copy_member(src, "a.txt")
+        assert _parse_extra_has_zip64(_first_local_extra(path)) is zip64

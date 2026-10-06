@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from typing_extensions import override
+
+from zipctl.compression.methods import (
+    ZIP_BZIP2,
+    CompressionEntry,
+    CompressorBase,
+    DecompressorBase,
+    after_end,
+    truncated,
+)
+from zipctl.exceptions import BadZipFile
+
+try:
+    import bz2
+
+    class _BZ2Compressor(CompressorBase):
+        """Wraps bz2.BZ2Compressor to satisfy CompressorBase.
+
+        Attributes:
+            _c: The underlying bz2.BZ2Compressor instance.
+        """
+
+        def __init__(self, level: int | None) -> None:
+            """Initializes the compressor with an optional compression level.
+
+            Args:
+                level: The compression level passed to bz2.BZ2Compressor.
+                    If None, the default compression level is used.
+            """
+            if level is not None:
+                self._c: bz2.BZ2Compressor = bz2.BZ2Compressor(level)
+            else:
+                self._c = bz2.BZ2Compressor()
+
+        @override
+        def compress(self, data: bytes) -> bytes:
+            """Compresses a chunk of data.
+
+            Args:
+                data: The raw bytes to compress.
+
+            Returns:
+                Compressed bytes. May be empty if data is buffered internally.
+            """
+            return self._c.compress(data)
+
+        @override
+        def flush(self) -> bytes:
+            """Flushes any remaining buffered data and finalizes the stream.
+
+            Returns:
+                The remaining compressed bytes.
+            """
+            return self._c.flush()
+
+    class _BZ2Decompressor(DecompressorBase):
+        """Wraps bz2.BZ2Decompressor to satisfy DecompressorBase.
+
+        Attributes:
+            _d: The underlying bz2.BZ2Decompressor instance.
+        """
+
+        def __init__(self) -> None:
+            """Initializes the decompressor."""
+            self._d: bz2.BZ2Decompressor = bz2.BZ2Decompressor()
+
+        @property
+        @override
+        def needs_input(self) -> bool:
+            # CPython says False once the stream has ended
+            return self._d.eof or self._d.needs_input
+
+        @override
+        def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+            """Decompresses a chunk of data.
+
+            Args:
+                data: The compressed bytes to decompress.
+
+            Returns:
+                Decompressed bytes.
+            """
+            if self._d.eof:
+                return after_end(data)
+            try:
+                result = self._d.decompress(data, max_length)
+            except (OSError, EOFError) as exc:
+                raise BadZipFile("Invalid BZIP2 data") from exc
+            after_end(self._d.unused_data)
+            return result
+
+        @override
+        def finish(self) -> None:
+            if not self._d.eof:
+                raise truncated()
+
+    compression_entry: CompressionEntry | None = CompressionEntry(
+        compression_method=ZIP_BZIP2,
+        compressor_factory=_BZ2Compressor,
+        decompressor_factory=lambda _flags, _limits: _BZ2Decompressor(),
+        levels=range(1, 10),
+    )
+except ImportError:
+    compression_entry = None

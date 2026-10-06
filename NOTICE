@@ -1,0 +1,25 @@
+zipctl includes code derived from upstream projects with their own
+retained notices and license texts.
+
+Upstream sources
+----------------
+
+1. CPython 3.14.3 stdlib `zipfile` module and related tests
+   Copyright (c) 2001 Python Software Foundation; All Rights Reserved.
+   Retained license text: `licenses/CPYTHON-3.14.3.txt`
+
+2. pyzipper
+   Copyright (c) 2017 Daniel Hillier
+   Retained license text: `licenses/pyzipper-MIT.txt`
+
+Brief summary of changes made to the CPython-derived code
+---------------------------------------------------------
+
+This project refactors the CPython `zipfile` implementation into a dedicated
+package layout under `zipctl.zipfile`, adapts the code for this
+standalone distribution, and extends it with additional encryption support,
+including WinZip AES integration and related interoperability tests.
+
+This notice is provided to satisfy the Python Software Foundation License
+Version 2 requirement to include a brief summary of changes made to Python in
+distributed derivative works.

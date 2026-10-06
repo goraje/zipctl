@@ -1,0 +1,94 @@
+"""Loading the extraction policy from the environment and the command line."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import replace
+from typing import Protocol
+
+from zipctl.cli.commands.helpers.sources import read_text_source
+from zipctl.cli.context import Context
+from zipctl.cli.errors import UsageError
+from zipctl.cli.output import printable
+from zipctl.zipfile.policy import ExtractPolicy, ExtractPolicyRule
+from zipctl.zipfile.policy_config import PolicyConfigError, policy_from_json
+
+__all__ = ["PolicyArgs", "add_policy_options", "load_policy"]
+
+POLICY_ENV_VAR = "ZIPCTL_POLICY"
+
+
+class PolicyArgs(Protocol):
+    """What :func:`add_policy_options` leaves on the parsed arguments."""
+
+    policy: str | None
+    policy_json: str | None
+    max_ratio: str | None
+
+
+def add_policy_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--policy",
+        metavar="FILE",
+        help="JSON policy file ('-' reads standard input)",
+    )
+    parser.add_argument(
+        "--policy-json",
+        metavar="TEXT",
+        help="inline JSON policy, applied on top of --policy",
+    )
+    parser.add_argument(
+        "--max-ratio",
+        metavar="N|none",
+        help="compression-ratio limit, overriding the policy's but keeping its "
+        "per-rule on_violation. Default: 100",
+    )
+
+
+def _parse(text: str, origin: str, base: ExtractPolicy) -> ExtractPolicy:
+    try:
+        return policy_from_json(text, base=base)
+    except PolicyConfigError as exc:
+        raise UsageError(
+            f"invalid policy ({origin})",
+            tuple(printable(str(issue)) for issue in exc.issues),
+        ) from None
+
+
+def load_policy(args: PolicyArgs, ctx: Context) -> ExtractPolicy:
+    """Build the effective policy from the command-line options."""
+    policy = ExtractPolicy()
+    default_file = ctx.environ.get(POLICY_ENV_VAR)
+    if default_file:
+        if default_file == "-":
+            raise UsageError(f"{POLICY_ENV_VAR} must name a file, not standard input")
+        text = read_text_source(default_file, ctx, "policy file")
+        policy = _parse(text, f"{POLICY_ENV_VAR}={printable(default_file)}", policy)
+    if args.policy is not None:
+        text = read_text_source(args.policy, ctx, "policy file")
+        policy = _parse(text, f"--policy {printable(args.policy)}", policy)
+    if args.policy_json is not None:
+        policy = _parse(args.policy_json, "--policy-json", policy)
+    if args.max_ratio is not None:
+        ratio = _ratio(args.max_ratio)
+        current = policy.max_compression_ratio
+        if ratio is not None and isinstance(current, ExtractPolicyRule):
+            # the flag sets no action, so a rule keeps its own
+            policy = replace(
+                policy, max_compression_ratio=replace(current, value=ratio)
+            )
+        else:
+            policy = replace(policy, max_compression_ratio=ratio)
+    return policy
+
+
+def _ratio(text: str) -> float | None:
+    if text.lower() == "none":
+        return None
+    try:
+        ratio = float(text)
+    except ValueError:
+        ratio = 0.0
+    if not ratio > 0 or ratio == float("inf"):
+        raise UsageError("--max-ratio expects a positive number or 'none'")
+    return ratio

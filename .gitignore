@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+.hypothesis/
+
+# Virtual environments
+.venv
+.python-version
+
+# AI-related
+CLAUDE.md
+.claudeignore
+.token-optimizer
+TODO.md
+.claude
+GLOSSARY.md
+
+# Mutation testing (uv run --with mutmut mutmut run)
+mutants/

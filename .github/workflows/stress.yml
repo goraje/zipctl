@@ -1,0 +1,31 @@
+name: bounded archive stress
+
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  streaming:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [20261002, 42, 8675309]
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -v tests/unit/zipfile/test_stream_differential.py tests/deployment/test_resource_isolation.py
+        env:
+          ZIPCTL_STREAM_SEED: ${{ matrix.seed }}
+          ZIPCTL_STREAM_OPERATIONS: '1000'

@@ -1,0 +1,184 @@
+[project]
+name = "zipctl"
+dynamic = ["version"]
+authors = [
+    { name = "Jerzy Góra", email = "goraje@users.noreply.github.com" },
+]
+description = "ZIP library derived from CPython zipfile with WinZip AES and ZipCrypto support"
+readme = "README.md"
+license = "MIT AND PSF-2.0"
+license-files = ["LICENSE", "NOTICE", "licenses/CPYTHON-3.14.3.txt", "licenses/pyzipper-MIT.txt"]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Archiving :: Compression",
+    "Typing :: Typed",
+]
+dependencies = [
+    "cryptography>=46.0.6",
+    "typing-extensions>=4.6.0",
+]
+
+[project.urls]
+Source = "https://github.com/goraje/zipctl"
+Issues = "https://github.com/goraje/zipctl/issues"
+
+[project.scripts]
+zipctl = "zipctl.cli:main"
+
+[project.optional-dependencies]
+zstd = ["backports.zstd>=1.0.0; python_version < '3.14'"]
+completion = ["shtab>=1.12.1"]
+
+[build-system]
+requires = ["hatch-vcs>=0.5.0", "hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "tests",
+    "licenses",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "PUBLIC_API.md",
+    "DIFFERENCES.md",
+    "pyproject.toml",
+]
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=6.0.0",
+    "pytest-sugar>=1.1.1",
+    "pytest-xdist>=3.8.0",
+]
+# Exact versions: the pre-commit hooks and CI run these from uv.lock.
+lint = [
+    "basedpyright==1.40.2",
+    "prek==0.5.5",
+    "ruff==0.16.10",
+    "ty==0.0.84",
+    "typos==1.50.3",
+]
+
+[tool.uv]
+default-groups = ["dev", "lint"]
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["*.md"]
+lint.select = [
+    "A",
+    "ANN",
+    "B",
+    "C4",
+    "C90",
+    "E",
+    "ERA",
+    "F",
+    "I",
+    "PIE",
+    "PT",
+    "PYI",
+    "SLF001",
+    "TID251",
+    "UP031",
+    "W",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# The library never imports the CLI; only the CLI, __main__ and tests may.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"zipctl.cli".msg = "the library must not import the CLI"
+
+[tool.ruff.lint.per-file-ignores]
+"src/zipctl/cli/**" = ["TID251"]
+"src/zipctl/__main__.py" = ["TID251"]
+"tests/**" = ["TID251", "SLF001"]
+# Private access is normal inside the library; SLF001 only guards the CLI.
+"src/zipctl/{zipfile,compression,cryptography}/**" = ["SLF001"]
+"src/zipctl/{__init__,exceptions}.py" = ["SLF001"]
+# argparse has no public API for what these three files customise.
+"src/zipctl/cli/{parser,formatter}.py" = ["SLF001"]
+"src/zipctl/cli/commands/helpers/command.py" = ["SLF001"]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "recommended"
+# Ignored .write()/.add() results are normal here; `_ = ...` on every one is noise.
+reportUnusedCallResult = "none"
+# Long help and error text is wrapped as adjacent string literals throughout.
+reportImplicitStringConcatenation = "none"
+
+# Tests reach into private state on purpose; mirrors the ruff SLF001 exemption for tests/**.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportPrivateUsage = "none"
+
+[tool.pytest.ini_options]
+addopts = "-n auto --strict-markers --strict-config"
+testpaths = ["tests"]
+xfail_strict = true
+filterwarnings = ["error"]
+markers = [
+    "windows: tests that require a Windows runner and 7-Zip",
+    "deployment: opt-in checks requiring a deployment-specific filesystem or provider",
+]
+
+# Run with `uv run --with mutmut mutmut run "<module glob>"` so mutmut never
+# enters uv.lock. Library only; the CLI pty tests do not survive forking.
+[tool.mutmut]
+paths_to_mutate = ["src/zipctl/"]
+do_not_mutate = ["src/zipctl/cli/*", "src/zipctl/__main__.py"]
+# mutmut's trampolines add stack frames, so warnings cannot point at the caller.
+pytest_add_cli_args = [
+    "-n0", "-p", "no:sugar", "-p", "no:cacheprovider",
+    "-k", "not warning_points_at",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/unit/zipfile",
+    "tests/unit/compression",
+    "tests/unit/cryptography",
+    "tests/smoke",
+    "tests/functional/test_zip64_functional.py",
+]
+
+[tool.coverage.report]
+# Measured at 96% on macOS / 3.14; platform-only branches lower it elsewhere.
+fail_under = 90
+
+[tool.typos.default.extend-words]
+Stichting = "Stichting"
+STICHTING = "STICHTING"
+Mathematisch = "Mathematisch"
+MATHEMATISCH = "MATHEMATISCH"
+caf = "caf"  # "caf\xe9" (café) escaped in expected output
+entires = "entires"  # a deliberately misspelled policy key
+pasword = "pasword"  # a deliberately misspelled encryption-spec key
+
+[tool.typos.default]
+extend-ignore-re = [
+    "(?Rm)^.*(#|//)\\s*spellchecker:disable-line$",
+    "(#|//)\\s*spellchecker:ignore-next-line\\n.*",
+]
