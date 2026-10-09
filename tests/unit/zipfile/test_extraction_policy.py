@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -851,8 +852,21 @@ def test_overlong_or_deep_paths_are_refused_before_writing(
     with zipctl.ZipFile(buffer) as zf, pytest.raises(ExtractionError) as caught:
         zf.safe_extractall(output)
 
-    assert code in [v.code for v in caught.value.result.violations]
+    codes = [v.code for v in caught.value.result.violations]
+    # Windows may refuse to resolve the path at all, before any limit is checked.
+    assert code in codes or (sys.platform == "win32" and "unsafe_destination" in codes)
     assert not output.exists() or not any(output.iterdir())
+
+
+def test_a_path_too_long_to_stat_has_no_file_type(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows raises ValueError, not OSError, for a path past its length limit.
+    def lstat(_path: object) -> os.stat_result:
+        raise ValueError("lstat: path too long for Windows")
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    assert validators._file_type(tmp_path) == 0
 
 
 def test_path_limits_can_be_lifted(tmp_path: Path) -> None:

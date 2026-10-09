@@ -240,7 +240,7 @@ def _file_type(path: Path) -> int:
     """The type bits of *path* itself (a symlink is not followed), 0 if missing."""
     try:
         return stat.S_IFMT(os.lstat(path).st_mode)
-    except OSError:
+    except (OSError, ValueError):  # Windows: ValueError for a path too long
         return 0
 
 

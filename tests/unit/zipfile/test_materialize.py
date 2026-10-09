@@ -8,6 +8,7 @@ from typing import NamedTuple, cast
 
 import pytest
 
+from tests.helpers import needs_fifo_dir_fd
 from zipctl.zipfile.exceptions import (
     ExtractionMaterializationError,
     ExtractionQuotaExceeded,
@@ -184,7 +185,7 @@ def test_symlink_over_directory_is_refused(tmp_path: Path) -> None:
     assert (tmp_path / "link").is_dir()
 
 
-@posix_only
+@needs_fifo_dir_fd
 def test_fifo_is_created_with_member_permissions(tmp_path: Path) -> None:
     _extract(tmp_path, "pipe", b"", stat.S_IFIFO | 0o640)
     mode = (tmp_path / "pipe").stat().st_mode

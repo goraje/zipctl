@@ -15,7 +15,7 @@ import pytest
 from typing_extensions import override
 
 import zipctl
-from tests.helpers import NonSeekableBytesIO
+from tests.helpers import NonSeekableBytesIO, needs_fifo_dir_fd
 from zipctl.compression import lzma, registry
 from zipctl.exceptions import BadZipFile, LargeZipFile
 from zipctl.zipfile.file import ZipFileExtra
@@ -476,7 +476,7 @@ def test_an_unsupported_method_is_a_violation_not_a_crash(tmp_path: Path) -> Non
     assert not (tmp_path / "odd.bin").exists()
 
 
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+@needs_fifo_dir_fd
 def test_a_fifo_never_gets_setuid_from_the_archive(tmp_path: Path) -> None:
     buffer = io.BytesIO()
     with zipctl.ZipFile(buffer, "w") as zf:
